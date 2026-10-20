@@ -1,4 +1,4 @@
-.PHONY: dev lint test splits r1 eval-dev summarize-dev
+.PHONY: dev lint test splits r1 eval-dev summarize-dev dataset audit
 
 MODEL ?= qwen3:8b
 
@@ -12,6 +12,16 @@ lint:
 
 test:
 	uv run pytest
+
+# L1 detector data: streams seeds from the HF Hub, writes data/ (gitignored) and the
+# committed sample, then runs the contamination audit on the full set before any training.
+dataset:
+	uv run --group training python -m training.build_dataset
+	uv run --group training python -m training.contamination_audit data/train.jsonl data/dev.jsonl data/test.jsonl --report training/audit_report.json
+
+# Contamination audit on the committed sample only (no network); this is what CI runs.
+audit:
+	uv run --group training python -m training.contamination_audit training/sample/sample.jsonl
 
 # Regenerating must be a no-op: the split is frozen (tests/unit/test_splits.py).
 splits:
