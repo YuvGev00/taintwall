@@ -122,7 +122,13 @@ class DeterministicOpenAILLM(OpenAILLM):
     def _create_with_backoff(self, request: dict[str, Any]) -> Any:
         for attempt in range(MAX_ATTEMPTS):
             try:
-                return self.client.chat.completions.create(**request)
+                completion = self.client.chat.completions.create(**request)
+                if completion.choices:
+                    return completion
+                # OpenRouter reports upstream rate limits / provider errors as a 200 with no choices.
+                if attempt == MAX_ATTEMPTS - 1:
+                    raise RuntimeError(f"provider returned no choices: {getattr(completion, 'error', None)}")
+                time.sleep(min(10 * 2**attempt, 120))
             except RETRY_ERRORS:
                 if attempt == MAX_ATTEMPTS - 1:
                     raise

@@ -1,0 +1,19 @@
+{
+  "suites": [
+    "banking",
+    "slack",
+    "travel",
+    "workspace"
+  ],
+  "benign_n": 29,
+  "benign_utility_k": 28,
+  "attack_n": 87,
+  "attack_utility_k": 82,
+  "attack_success_k": 0,
+  "wall_seconds": 1813.3,
+  "tokens": {
+    "calls": 478,
+    "prompt_tokens": 1931362,
+    "completion_tokens": 29335
+  }
+}
