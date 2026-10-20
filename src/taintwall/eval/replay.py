@@ -43,6 +43,7 @@ from agentdojo.types import (
 from pydantic import BaseModel
 
 from taintwall.eval.splits import load_splits
+from taintwall.policy import TaintPolicy, load_registry
 
 ROOT = Path(__file__).resolve().parents[3]
 RESULTS_DIR = ROOT / "results" / "r1"
@@ -204,9 +205,29 @@ def empty_ground_truth_injections(suite_name: str, benchmark_version: str) -> se
     return {i for i, t in suite.injection_tasks.items() if not t.ground_truth(env.model_copy(deep=True))}
 
 
-def get_defense(name: str) -> ReplayDefense:
+class TaintwallL2:
+    """The taint policy (L2) as a replay defense: it only blocks calls, never redacts."""
+
+    name = "taintwall-l2"
+
+    def __init__(self, suite_name: str) -> None:
+        self.policy = TaintPolicy(load_registry(suite_name))
+
+    def screen_output(self, function: str, text: str) -> str | None:
+        return text
+
+    def allow_call(self, call: FunctionCall, ctx: ReplayContext) -> str | None:
+        return self.policy.check(call, ctx.user_prompt, ctx.messages)
+
+
+R1_DEFENSES = ("none", "taintwall-l2")
+
+
+def get_defense(name: str, suite_name: str) -> ReplayDefense:
     if name == "none":
         return NoDefense()
+    if name == "taintwall-l2":
+        return TaintwallL2(suite_name)
     raise ValueError(f"no R1 implementation for defense {name!r} yet")
 
 
@@ -270,15 +291,14 @@ def run_suite(
 def main() -> None:
     parser = argparse.ArgumentParser(description="R1 hijacked-agent replay (no model, no API key).")
     parser.add_argument("--split", default="dev", choices=["dev", "test"])
-    parser.add_argument("--defense", default="none")
+    parser.add_argument("--defense", default="none", choices=R1_DEFENSES)
     parser.add_argument("--suite", action="append", help="repeatable; default: all four suites")
     args = parser.parse_args()
 
-    defense = get_defense(args.defense)
-    out_dir = RESULTS_DIR / defense.name / args.split
+    out_dir = RESULTS_DIR / args.defense / args.split
     out_dir.mkdir(parents=True, exist_ok=True)
     for suite_name in args.suite or ["banking", "slack", "travel", "workspace"]:
-        r = run_suite(suite_name, args.split, defense)
+        r = run_suite(suite_name, args.split, get_defense(args.defense, suite_name))
         (out_dir / f"{suite_name}.json").write_text(json.dumps(r, indent=2) + "\n")
         b, h = r["benign"], r["hijacked"]
         print(

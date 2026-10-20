@@ -1,0 +1,13 @@
+# Tool registry for AgentDojo's slack suite (schemas only; see workspace.yaml).
+get_channels:          {source: trusted}
+add_user_to_channel:   {effect: write, sensitive: [user, channel]}
+read_channel_messages: {source: untrusted}
+read_inbox:            {source: untrusted}
+send_direct_message:   {effect: external, sensitive: [recipient]}
+send_channel_message:  {effect: external, sensitive: [channel]}
+get_users_in_channel:  {source: trusted}
+invite_user_to_slack:  {effect: external, sensitive: [user, user_email]}
+remove_user_from_slack: {effect: write, sensitive: [user]}
+# Fetching a URL is a side effect: the URL itself can carry exfiltrated data.
+get_webpage:           {source: untrusted, effect: external, sensitive: [url]}
+post_webpage:          {effect: external, sensitive: [url]}
