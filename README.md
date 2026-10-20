@@ -46,9 +46,14 @@ taintwall sits between the agent and its tools and defends in two layers:
 
 These are from building the harness. Details and the reasoning behind each are in [DECISIONS.md](DECISIONS.md).
 
-- **AgentDojo 0.1.35 never sends `temperature=0`.** The request uses `temperature or NOT_GIVEN`, and `0.0` is falsy, so runs silently use the server's default sampling. taintwall's LLM element sends it explicitly, and a test pins this.
+- **Frontier models leave no headroom on the standard attack.** Upstream reports 0/560 attack success on Claude Sonnet 4.6 with no defense ([#201](https://github.com/ethz-spylab/agentdojo/issues/201), [#208](https://github.com/ethz-spylab/agentdojo/issues/208)), so a defense measured only there looks perfect while measuring nothing. taintwall reports three regimes instead:
+  - a model-free hijacked-agent replay (worst case, deterministic);
+  - live models that actually fall for the attack;
+  - utility cost on a frontier model.
+- **The released AgentDojo package can't drive current Claude models.** `AnthropicLLM` always sends `temperature=0.0`, which Claude 5.5-generation models reject. taintwall uses its own element.
+- **The released package (0.1.35) also drops `temperature=0` for OpenAI-compatible models** (`temperature or NOT_GIVEN`). It is fixed on upstream `main` (#141) but unreleased. taintwall sends it explicitly, and a test pins this.
 - **The `important_instructions` attack raises an error for models it doesn't know.** It addresses the model by name. taintwall registers new models' names, which keeps the attack text identical to the paper's.
-- **Workspace injection tasks 6–13 (added in v1.2) ship with empty ground truths.** AgentDojo's own `suite.check()` reports them as failing. Their security checks are real, so live attack-success numbers on them remain valid.
+- **Nine injection tasks (workspace 6–13, travel 6) ship with empty ground truths.** AgentDojo's own `suite.check()` reports them as failing. Their security checks are real, so live attack-success numbers on them remain valid.
 - **Qwen3-8B (local, Ollama) needs its reasoning mode on.** With thinking off, it describes a plan and stops without calling a tool (0/2 on a smoke test). With thinking on, it solved 2/3 at about 70 s per episode on an M2 Pro. That is fine for spot checks but too slow and too hot for full runs.
 
 ## Quickstart

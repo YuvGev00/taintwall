@@ -13,11 +13,14 @@ from taintwall.eval.splits import load_splits
 SPLITS = load_splits()
 SUITES = sorted(SPLITS["suites"])
 
-# In agentdojo 0.1.35 these v1.2 injection tasks ship with `ground_truth() -> []`,
+# In agentdojo 0.1.35 these 9 injection tasks ship with `ground_truth() -> []` (also
+# reported upstream in #208),
 # so replaying the ground truth can't achieve them (their `security()` checks are
 # real, so live ASR is still valid). Pinned so an upstream change shows up here.
 # See DECISIONS.md.
-KNOWN_UPSTREAM_GT_FAILURES = {("workspace", f"injection_task_{i}") for i in range(6, 14)}
+KNOWN_UPSTREAM_GT_FAILURES = {("workspace", f"injection_task_{i}") for i in range(6, 14)} | {
+    ("travel", "injection_task_6")
+}
 
 
 @pytest.mark.parametrize("suite_name", SUITES)
