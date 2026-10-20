@@ -70,6 +70,11 @@ class DeterministicOpenAILLM(OpenAILLM):
 
     usage_path: Path | None = None
 
+    def _sigs(self) -> dict[str, Any]:
+        if not hasattr(self, "_signatures"):
+            self._signatures: dict[str, Any] = {}
+        return self._signatures
+
     def query(
         self,
         query: str,
@@ -80,7 +85,7 @@ class DeterministicOpenAILLM(OpenAILLM):
     ) -> tuple[str, FunctionsRuntime, Env, Sequence[ChatMessage], dict[str, Any]]:
         request: dict[str, Any] = {
             "model": self.model,
-            "messages": [_message_to_openai(m, self.model) for m in messages],
+            "messages": [self._with_signatures(_message_to_openai(m, self.model)) for m in messages],
         }
         tools = [_function_to_openai(t) for t in runtime.functions.values()]
         if tools:
@@ -91,8 +96,28 @@ class DeterministicOpenAILLM(OpenAILLM):
             request["reasoning_effort"] = self.reasoning_effort
         completion = self._create_with_backoff(request)
         self._log_usage(completion)
+        self._remember_signatures(completion.choices[0].message)
         output = _openai_to_assistant_message(completion.choices[0].message)
         return query, runtime, env, [*messages, output], extra_args
+
+    def _remember_signatures(self, message: Any) -> None:
+        """Gemini 3 needs each tool call's `thought_signature` echoed back; AgentDojo's message type drops it."""
+        for call in message.tool_calls or []:
+            extra = (call.model_extra or {}).get("extra_content")
+            if extra:
+                self._sigs()[call.id] = extra
+
+    def _with_signatures(self, message: Any) -> Any:
+        calls = message.get("tool_calls") if message.get("role") == "assistant" else None
+        if calls and self.model.startswith("gemini-"):
+            sigs = self._sigs()
+            for call in calls:
+                # Gemini's documented escape hatch for calls it never signed (e.g. only the first
+                # of parallel calls carries a signature).
+                call["extra_content"] = sigs.get(call["id"]) or {
+                    "google": {"thought_signature": "skip_thought_signature_validator"}
+                }
+        return message
 
     def _create_with_backoff(self, request: dict[str, Any]) -> Any:
         for attempt in range(MAX_ATTEMPTS):
