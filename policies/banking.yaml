@@ -1,0 +1,12 @@
+# Tool registry for AgentDojo's banking suite (schemas only; see workspace.yaml).
+get_iban:              {source: trusted}
+send_money:            {effect: external, sensitive: [recipient]}
+schedule_transaction:  {effect: external, sensitive: [recipient]}
+update_scheduled_transaction: {effect: external, sensitive: [recipient]}
+get_balance:           {source: trusted}
+get_most_recent_transactions: {source: untrusted}  # subjects are written by counterparties
+get_scheduled_transactions: {source: trusted}      # created by the account owner
+read_file:             {source: untrusted}
+get_user_info:         {source: trusted}
+update_password:       {effect: write, sensitive: [password]}
+update_user_info:      {effect: write, sensitive: [first_name, last_name, street, city]}

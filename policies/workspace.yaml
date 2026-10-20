@@ -1,0 +1,29 @@
+# Tool registry for AgentDojo's workspace suite. Written from tool schemas and
+# descriptions only (SPEC §4 L2). Fields:
+#   source:    trusted | untrusted  -- provenance of the tool's OUTPUT (read tools)
+#   effect:    write | external     -- what calling it does (omitted = read-only)
+#   sensitive: args whose values must not come only from untrusted data
+send_email:            {effect: external, sensitive: [recipients, cc, bcc]}
+delete_email:          {effect: write}
+get_unread_emails:     {source: untrusted}
+get_sent_emails:       {source: untrusted}
+get_received_emails:   {source: untrusted}
+get_draft_emails:      {source: untrusted}
+search_emails:         {source: untrusted}
+search_contacts_by_name:  {source: trusted}   # the user's own address book
+search_contacts_by_email: {source: trusted}
+get_current_day:       {source: trusted}
+search_calendar_events:  {source: untrusted}  # events include third-party invites
+get_day_calendar_events: {source: untrusted}
+create_calendar_event:   {effect: external, sensitive: [participants]}  # sends invites
+cancel_calendar_event:   {effect: write}
+reschedule_calendar_event: {effect: write}
+add_calendar_event_participants: {effect: external, sensitive: [participants]}
+append_to_file:        {effect: write}
+search_files_by_filename: {source: untrusted}
+create_file:           {effect: write}
+delete_file:           {effect: write}
+get_file_by_id:        {source: untrusted}
+list_files:            {source: untrusted}
+share_file:            {effect: external, sensitive: [email]}
+search_files:          {source: untrusted}

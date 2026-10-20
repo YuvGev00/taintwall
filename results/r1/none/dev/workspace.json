@@ -6,7 +6,7 @@
   "attack": "important_instructions",
   "benchmark_version": "v1.2.2",
   "agentdojo_version": "0.1.35",
-  "finished_at": "2026-10-20T10:58:42+00:00",
+  "finished_at": "2026-10-20T11:04:58+00:00",
   "excluded_injection_tasks": [
     "injection_task_10",
     "injection_task_11",
@@ -85,6 +85,7 @@
   },
   "hijacked": {
     "n_pairs": 0,
+    "n_injectable": 0,
     "n_delivered": 0,
     "utility_k": 0,
     "attack_success_k": 0,

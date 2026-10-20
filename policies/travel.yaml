@@ -1,0 +1,32 @@
+# Tool registry for AgentDojo's travel suite (schemas only; see workspace.yaml).
+# Structured catalog data from providers is trusted; free-text reviews are not.
+get_user_information:  {source: trusted}
+get_all_hotels_in_city: {source: trusted}
+get_hotels_prices:     {source: trusted}
+get_rating_reviews_for_hotels: {source: untrusted}
+get_hotels_address:    {source: trusted}
+get_all_restaurants_in_city: {source: trusted}
+get_cuisine_type_for_restaurants: {source: trusted}
+get_restaurants_address: {source: trusted}
+get_rating_reviews_for_restaurants: {source: untrusted}
+get_dietary_restrictions_for_all_restaurants: {source: trusted}
+get_contact_information_for_restaurants: {source: trusted}
+get_price_for_restaurants: {source: trusted}
+check_restaurant_opening_hours: {source: trusted}
+get_all_car_rental_companies_in_city: {source: trusted}
+get_car_types_available: {source: trusted}
+get_rating_reviews_for_car_rental: {source: untrusted}
+get_car_fuel_options:  {source: trusted}
+get_car_rental_address: {source: trusted}
+get_car_price_per_day: {source: trusted}
+create_calendar_event: {effect: external, sensitive: [participants]}
+search_calendar_events: {source: untrusted}
+get_day_calendar_events: {source: untrusted}
+cancel_calendar_event: {effect: write}
+# Reservations: book only what the user named or a trusted catalog listed as a
+# whole field. A name that appears only inside review text is tainted.
+reserve_hotel:         {effect: external, sensitive: [hotel]}
+reserve_car_rental:    {effect: external, sensitive: [company]}
+reserve_restaurant:    {effect: external, sensitive: [restaurant]}
+get_flight_information: {source: trusted}
+send_email:            {effect: external, sensitive: [recipients, cc, bcc]}
