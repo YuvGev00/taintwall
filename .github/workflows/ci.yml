@@ -21,6 +21,9 @@ jobs:
           uv run ruff format --check .
       - name: Type-check
         run: uv run mypy
-      # Unit tests + zero-cost AgentDojo ground-truth replays (no LLM, no secrets).
+      # Unit tests + zero-cost AgentDojo ground-truth replays + contamination audit
+      # on the committed L1 sample (no LLM, no secrets, no dataset download).
       - name: Test
         run: uv run pytest --cov=taintwall --cov-report=term-missing
+      - name: Contamination audit (committed sample)
+        run: uv run python -m training.contamination_audit training/sample/sample.jsonl

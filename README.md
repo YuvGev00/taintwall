@@ -76,7 +76,7 @@ Every (user task, injection task) pair is replayed as an agent that obeys every 
   - Attack success rate: the injection goal was executed.
   - Latency overhead per tool call.
   - Defenses run on the same pairs, so comparisons are paired.
-- **Detector training data never includes AgentDojo text.** A contamination audit (8-gram overlap) enforces this in CI.
+- **Detector training data never includes AgentDojo text.** A contamination audit (8-gram overlap + attacker entities) enforces this in CI. On the full L1 build: **0 / 23,427 rows** share any AgentDojo 8-gram and **0 rows** contain an AgentDojo entity (`training/audit_report.json`).
 
 ## Findings so far
 
@@ -96,8 +96,13 @@ These are from building the harness. Details and the reasoning behind each are i
 
 ```bash
 uv sync
-make lint test          # ruff, mypy --strict, unit tests, ground-truth replays (no LLM needed)
+make lint test          # ruff, mypy --strict, unit tests, ground-truth replays, contamination audit (no LLM needed)
+make dataset            # build the L1 dataset (streams seeds from HF) and re-run the audit on the full set
 ```
+
+The L1 detector is trained on a free Colab T4 from [`training/train.ipynb`](training/train.ipynb);
+`data/` is gitignored and regenerable, with a licence-clean sample committed under `training/sample/`.
+See [`training/MODEL_CARD.md`](training/MODEL_CARD.md).
 
 Run the benchmark on the dev split against any OpenAI-compatible endpoint:
 
@@ -141,8 +146,8 @@ DECISIONS.md              dated decision log
 - [x] R1 hijacked-agent replay harness, with the no-defense ceiling measured
 - [x] L2 taint policy v1: attack success 97.0% → 13.1% (worst case, test) at a benign-utility cost of 22 points
 - [ ] R2/R3 baselines on free-tier models (no defense plus 2 AgentDojo built-ins)
-- [ ] Indirect-injection dataset and contamination audit
-- [ ] Fine-tuned detector (ModernBERT), published on Hugging Face
+- [x] Indirect-injection dataset (23.4k rows, 50/50, span-level splits) and contamination audit (0/23,427 flagged), gated in CI
+- [ ] Fine-tuned detector (ModernBERT): `training/train.ipynb` ready for a free Colab T4; threshold at FPR ≤ 1% on dev vs the protectai baseline
 - [ ] Detection service (FastAPI) and end-to-end L1 results
 - [ ] Ablations, frozen config, full test-split runs with paired statistics
 - [ ] Traces, load test, demo, write-up
