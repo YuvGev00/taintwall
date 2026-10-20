@@ -42,12 +42,19 @@ from agentdojo.agent_pipeline.llms.openai_llm import (
 )
 from agentdojo.agent_pipeline.tool_execution import tool_result_to_str
 from agentdojo.functions_runtime import EmptyEnv, Env, FunctionsRuntime
-from agentdojo.types import ChatAssistantMessage, ChatMessage, text_content_block_from_string
+from agentdojo.types import (
+    ChatAssistantMessage,
+    ChatMessage,
+    ChatToolResultMessage,
+    text_content_block_from_string,
+)
+
+from taintwall.policy import TaintPolicy, load_registry
 
 Provider = Literal["ollama", "openai-compatible", "anthropic"]
-Defense = Literal["none", "spotlighting", "protectai"]
+Defense = Literal["none", "spotlighting", "protectai", "taintwall-l2"]
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
-DEFENSES: tuple[Defense, ...] = ("none", "spotlighting", "protectai")
+DEFENSES: tuple[Defense, ...] = ("none", "spotlighting", "protectai", "taintwall-l2")
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 _EMPTY_ENV = EmptyEnv()
@@ -209,6 +216,51 @@ class ClaudeLLM(AnthropicLLM):
         return query, runtime, env, [*messages, output], extra_args
 
 
+class PolicyToolsExecutor(ToolsExecutor):
+    """ToolsExecutor that asks the L2 taint policy before running each call.
+
+    A blocked call is not executed; the model gets an error result instead, the same
+    shape ToolsExecutor uses for an invalid tool, so it can recover. Allowed calls go
+    through ToolsExecutor unchanged. Calls are checked one at a time, so a later call
+    in a parallel batch sees the results of the earlier ones.
+    """
+
+    def __init__(self, policy: TaintPolicy) -> None:
+        super().__init__()
+        self.policy = policy
+
+    def query(
+        self,
+        query: str,
+        runtime: FunctionsRuntime,
+        env: Env = _EMPTY_ENV,  # type: ignore[assignment]  # same default as upstream
+        messages: Sequence[ChatMessage] = (),
+        extra_args: dict[str, Any] = {},  # noqa: B006 - matches the AgentDojo signature
+    ) -> tuple[str, FunctionsRuntime, Env, Sequence[ChatMessage], dict[str, Any]]:
+        if not messages or messages[-1]["role"] != "assistant" or not messages[-1]["tool_calls"]:
+            return query, runtime, env, messages, extra_args
+        assistant = messages[-1]
+        history: list[ChatMessage] = list(messages)
+        known = {tool.name for tool in runtime.functions.values()}
+        for call in assistant["tool_calls"] or []:
+            reason = self.policy.check(call, query, history) if call.function in known else None
+            if reason is not None:
+                history.append(
+                    ChatToolResultMessage(
+                        role="tool",
+                        content=[text_content_block_from_string("")],
+                        tool_call_id=call.id,
+                        tool_call=call,
+                        error=f"Blocked by policy: {reason}",
+                    )
+                )
+                continue
+            single = ChatAssistantMessage(role="assistant", content=assistant["content"], tool_calls=[call])
+            _, _, env, executed, _ = super().query(query, runtime, env, [*history, single], extra_args)
+            history.append(executed[-1])
+        return query, runtime, env, history, extra_args
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     provider: Provider
@@ -246,7 +298,9 @@ def make_llm(spec: ModelSpec) -> BasePipelineElement:
     raise ValueError(f"unknown provider: {spec.provider}")
 
 
-def build_pipeline(spec: ModelSpec, defense: Defense = "none", llm: BasePipelineElement | None = None) -> AgentPipeline:
+def build_pipeline(
+    spec: ModelSpec, defense: Defense = "none", llm: BasePipelineElement | None = None, suite_name: str | None = None
+) -> AgentPipeline:
     """Assemble the pipeline AgentDojo builds for the same defense, with our LLM element.
 
     Mirrors `AgentPipeline.from_config` in agentdojo 0.1.35 for each baseline.
@@ -276,6 +330,10 @@ def build_pipeline(spec: ModelSpec, defense: Defense = "none", llm: BasePipeline
             model_name="protectai/deberta-v3-base-prompt-injection-v2", safe_label="SAFE", threshold=0.5, mode="message"
         )
         loop_elements = [ToolsExecutor(), detector, llm]
+    elif defense == "taintwall-l2":
+        if suite_name is None:
+            raise ValueError("taintwall-l2 needs suite_name to load its tool registry")
+        loop_elements = [PolicyToolsExecutor(TaintPolicy(load_registry(suite_name))), llm]
     else:
         loop_elements = [ToolsExecutor(), llm]
 

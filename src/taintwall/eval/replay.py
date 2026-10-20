@@ -22,6 +22,7 @@ Accounting rules (DECISIONS.md, 2026-10-20):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from collections.abc import Iterator, Sequence
@@ -224,7 +225,88 @@ class TaintwallL2:
         return self.policy.check(call, ctx.user_prompt, ctx.messages)
 
 
-R1_DEFENSES = ("none", "taintwall-l2")
+PROTECTAI_MODEL = "protectai/deberta-v3-base-prompt-injection-v2"
+PROTECTAI_THRESHOLD = 0.5
+PROTECTAI_CACHE = ROOT / "runs" / "protectai_cache.json"  # text sha256 -> flagged; gitignored with runs/
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+class ProtectAIDetector:
+    """AgentDojo's ProtectAI baseline as a replay defense: redact an output the classifier flags.
+
+    Same model and threshold as `TransformersBasedPIDetector(mode="message")`. Texts are
+    truncated to the model's 512 tokens. Verdicts are cached by text hash on disk (CPU
+    inference is slow and the replay shows the same outputs many times), and `warm`
+    classifies many texts in batches.
+    """
+
+    name = "protectai"
+    batch_size = 16
+
+    def __init__(self, cache_path: Path = PROTECTAI_CACHE) -> None:
+        self.cache_path = cache_path
+        self.cache: dict[str, bool] = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+        self._pipe: Any = None
+
+    def _classifier(self) -> Any:
+        if self._pipe is None:
+            from transformers import pipeline  # optional `detector` dependency group
+
+            self._pipe = pipeline("text-classification", model=PROTECTAI_MODEL, truncation=True, max_length=512)
+        return self._pipe
+
+    def warm(self, texts: Sequence[str]) -> None:
+        todo = sorted({t for t in texts if _sha(t) not in self.cache})
+        todo.sort(key=len)  # similar lengths per batch -> less padding
+        if not todo:
+            return
+        out = self._classifier()(todo, batch_size=self.batch_size)
+        for text, verdict in zip(todo, out, strict=True):
+            flagged = verdict["label"] != "SAFE" and verdict["score"] >= PROTECTAI_THRESHOLD
+            self.cache[_sha(text)] = flagged
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self.cache_path.write_text(json.dumps(self.cache))
+
+    def flagged(self, text: str) -> bool:
+        if _sha(text) not in self.cache:
+            self.warm([text])
+        return self.cache[_sha(text)]
+
+    def screen_output(self, function: str, text: str) -> str | None:
+        return None if self.flagged(text) else text
+
+    def allow_call(self, call: FunctionCall, ctx: ReplayContext) -> str | None:
+        return None
+
+
+class ProtectAIPlusL2(ProtectAIDetector):
+    """ProtectAI screens outputs, L2 gates calls."""
+
+    name = "protectai+l2"
+
+    def __init__(self, suite_name: str, cache_path: Path = PROTECTAI_CACHE) -> None:
+        super().__init__(cache_path)
+        self.l2 = TaintwallL2(suite_name)
+
+    def allow_call(self, call: FunctionCall, ctx: ReplayContext) -> str | None:
+        return self.l2.allow_call(call, ctx)
+
+
+class _Recorder(NoDefense):
+    """Passes everything through and records each tool output, to batch-classify them up front."""
+
+    def __init__(self) -> None:
+        self.texts: set[str] = set()
+
+    def screen_output(self, function: str, text: str) -> str | None:
+        self.texts.add(text)
+        return text
+
+
+R1_DEFENSES = ("none", "taintwall-l2", "protectai", "protectai+l2")
 
 
 def get_defense(name: str, suite_name: str) -> ReplayDefense:
@@ -232,10 +314,26 @@ def get_defense(name: str, suite_name: str) -> ReplayDefense:
         return NoDefense()
     if name == "taintwall-l2":
         return TaintwallL2(suite_name)
+    if name == "protectai":
+        return ProtectAIDetector()
+    if name == "protectai+l2":
+        return ProtectAIPlusL2(suite_name)
     raise ValueError(f"no R1 implementation for defense {name!r} yet")
 
 
 def run_suite(
+    suite_name: str, split: str, defense: ReplayDefense, attack_name: str = "important_instructions"
+) -> dict[str, Any]:
+    if isinstance(defense, ProtectAIDetector):
+        # A pass-through replay sees a superset of the outputs any redacting defense will, so
+        # classifying them all first (in batches) leaves the real run with cache hits only.
+        recorder = _Recorder()
+        _replay(suite_name, split, recorder, attack_name)
+        defense.warm(sorted(recorder.texts))
+    return _replay(suite_name, split, defense, attack_name)
+
+
+def _replay(
     suite_name: str, split: str, defense: ReplayDefense, attack_name: str = "important_instructions"
 ) -> dict[str, Any]:
     splits = load_splits()

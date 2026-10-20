@@ -54,7 +54,7 @@ def run_suite(
     user_tasks = s["user_tasks"][split]  # type: ignore[literal-required]
     injection_tasks = s["injection_tasks"][split]  # type: ignore[literal-required]
 
-    pipeline = build_pipeline(spec, defense=defense)
+    pipeline = build_pipeline(spec, defense=defense, suite_name=suite_name)
     logdir = RUNS_DIR
 
     started = time.time()
