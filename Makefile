@@ -1,4 +1,4 @@
-.PHONY: dev lint test splits eval-dev summarize-dev
+.PHONY: dev lint test splits r1 eval-dev summarize-dev
 
 MODEL ?= qwen3:8b
 
@@ -16,6 +16,12 @@ test:
 # Regenerating must be a no-op: the split is frozen (tests/unit/test_splits.py).
 splits:
 	uv run python -m taintwall.eval.splits
+
+# R1 hijacked-agent replay: no model, no API key, seconds. DEFENSE=none|...
+DEFENSE ?= none
+r1:
+	uv run python -m taintwall.eval.replay --split dev --defense $(DEFENSE)
+	uv run python -m taintwall.eval.replay --split test --defense $(DEFENSE)
 
 # Needs a model server; default is Ollama on localhost:11434 (see README).
 eval-dev:

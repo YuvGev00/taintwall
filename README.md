@@ -13,18 +13,30 @@ taintwall sits between the agent and its tools and defends in two layers:
 | **L1: detector** | A fine-tuned classifier scores every tool result and redacts likely injections | Probabilistic, tuned to ≤1% false positives |
 | **L2: taint policy** | Tracks where every value came from. Blocks side-effecting tool calls (send money, send email, share file) whose sensitive arguments appear *only* in untrusted tool output | Deterministic for the flows it encodes, at a measured utility cost |
 
-> **Status: week 1 of 10.** The harness, frozen splits and CI are in place. Defenses and results come next. The full plan is in [SPEC.md](SPEC.md).
+> **Status: in progress.** The harness, frozen splits, CI and the R1 replay are done. The defenses come next. The full plan is in [SPEC.md](SPEC.md).
 
 ## Results
 
-*Pending.* The first runs will use a hosted model endpoint. Every number will be reported on the **held-out test split**, with 95% bootstrap confidence intervals.
+### R1: hijacked-agent replay (model-free worst case, test split)
 
-| Model | Defense | Benign utility ↑ | Utility under attack ↑ | Attack success ↓ | p95 overhead |
-|---|---|---|---|---|---|
-| — | none | — | — | — | — |
-| — | spotlighting (AgentDojo built-in) | — | — | — | — |
-| — | ProtectAI detector (AgentDojo built-in) | — | — | — | — |
-| — | **taintwall L1 + L2** | — | — | — | — |
+Every (user task, injection task) pair is replayed as an agent that obeys every injection it reads. Scoring uses AgentDojo's own checkers. It is deterministic, needs no API key, and the full test split runs in about 4 seconds.
+
+| Defense | Benign utility ↑ | Attack success on delivered pairs ↓ |
+|---|---|---|
+| none | 68/68 (100%) | **325/335 (97.0%)** |
+| ProtectAI detector | — | — |
+| **taintwall L1 + L2** | — | — |
+
+- The no-defense row is the ceiling a defense has to bring down.
+- It matches the ~97.5% that [upstream #208](https://github.com/ethz-spylab/agentdojo/issues/208) found independently.
+- 9 injection tasks with empty ground truths are excluded (see below).
+
+### R2 / R3: live agents
+
+*Pending.*
+- R2 runs free tool-calling models that actually fall for the attack.
+- R3 measures the utility cost on a frontier model (Gemini free tier, with Claude optional).
+- Every live number will be on the held-out test split with 95% bootstrap CIs.
 
 ## Evaluation protocol
 
@@ -88,7 +100,8 @@ The runner writes per-suite pass/fail counts to `results/<run>/<split>/<suite>.j
 src/taintwall/
   adapters/agentdojo.py   pipeline builder for any model (L1/L2 plug in here)
   eval/splits.py          frozen dev/test split generator
-  eval/run_agentdojo.py   benchmark runner → raw counts
+  eval/run_agentdojo.py   live benchmark runner (R2/R3) → raw counts
+  eval/replay.py          R1 hijacked-agent replay + the defense interface
 eval/splits.json          the committed split
 tests/unit/               split, adapter
 tests/groundtruth/        AgentDojo ground-truth replays (zero cost, deterministic)
@@ -99,7 +112,8 @@ DECISIONS.md              dated decision log
 ## Roadmap
 
 - [x] Week 1: harness, frozen split, CI
-- [ ] Baseline numbers on a hosted model (no defense plus 2 AgentDojo built-ins)
+- [x] R1 hijacked-agent replay harness, with the no-defense ceiling measured
+- [ ] R2/R3 baselines on free-tier models (no defense plus 2 AgentDojo built-ins)
 - [ ] Indirect-injection dataset and contamination audit
 - [ ] Fine-tuned detector (ModernBERT), published on Hugging Face
 - [ ] Detection service (FastAPI) and end-to-end L1 results

@@ -83,3 +83,17 @@ Each entry records what was decided, the alternatives, and why. Keep adding entr
   - Rate limits make runs slower, so they run overnight and resume.
   - `:free` model availability changes, so exact model ids and dates are logged with every result.
   - The Gemini free tier uses content to improve Google's products. Fine for AgentDojo's synthetic environments; never for private data.
+
+## 2026-10-20: R1 replay design details
+
+- **Delivery check: whitespace-insensitive search of the raw tool-result strings.**
+  - Environments are YAML templates, so an injected string's whitespace can change on load.
+  - Exact matching against the formatted output found the injection in **0 of 97** user tasks.
+  - Whitespace-normalized matching against the formatted output found 74 of 97.
+  - Matching the raw result strings with whitespace removed found **97 of 97**.
+- **Plugs into AgentDojo's own scoring.** `HijackedReplay` is a pipeline element run through `TaskSuite.run_task_with_pipeline`, so the trace-based checkers apply unchanged: 7 workspace and 5 slack user tasks, plus slack injection_task_5.
+- **Blocked calls are kept out of the trace.** Otherwise a trace-based checker would score an attempted-but-blocked call as a successful attack (upstream #168). A test pins this with a block-everything defense.
+- **The attacker phase runs only when the injection was delivered and not redacted.** A defense that redacts the carrying output therefore stops the attack. Pairs where nothing was delivered are excluded from the ASR denominator (#208).
+- **Utility under hijack is not reported.** The attacker's extra actions break strict utility checks: travel 0/56, workspace 0/168. R1 reports benign utility (the defense's false-positive cost) and ASR.
+- **No-defense ceiling: 325/335 = 97.0% (test).** Ten delivered pairs fail even for a fully obedient agent (banking ×2 on injection_task_8, travel ×2 on injection_task_2, workspace ×6 on injection_task_0). Their user tasks change state that the attack goal depends on. Left as is and documented.
+- **Workspace dev has 0 R1 pairs.** All four of its dev injection tasks have empty ground truths. Not re-salted (split-shopping). Workspace is covered by R1 test and by R2/R3.
