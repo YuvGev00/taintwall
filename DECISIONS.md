@@ -97,3 +97,21 @@ Each entry records what was decided, the alternatives, and why. Keep adding entr
 - **Utility under hijack is not reported.** The attacker's extra actions break strict utility checks: travel 0/56, workspace 0/168. R1 reports benign utility (the defense's false-positive cost) and ASR.
 - **No-defense ceiling: 325/335 = 97.0% (test).** Ten delivered pairs fail even for a fully obedient agent (banking ×2 on injection_task_8, travel ×2 on injection_task_2, workspace ×6 on injection_task_0). Their user tasks change state that the attack goal depends on. Left as is and documented.
 - **Workspace dev has 0 R1 pairs.** All four of its dev injection tasks have empty ground truths. Not re-salted (split-shopping). Workspace is covered by R1 test and by R2/R3.
+
+## 2026-10-20: L2 taint policy v1
+
+- **Registry (`policies/*.yaml`) is written from tool schemas and descriptions only.** For each tool:
+  - `source` (trusted or untrusted) says where its output comes from. Trusted means data the user owns or a system of record: contacts, account info, scheduled transactions, structured catalogs, channel and member lists. Untrusted means third-party content: emails, files, calendar events, reviews, messages, webpages, transaction subjects.
+  - `effect` (write or external) and `sensitive` args mark where a hijacked agent could do harm: destinations, IBANs, URLs, passwords, reservation targets.
+- **Rule:** block a call when a sensitive value appears only in untrusted data.
+  - A value found nowhere is allowed, because it was produced by the agent, and an attacker's value must arrive through a tool output to exist.
+  - A tool missing from the registry is blocked.
+- **Dev error analysis led to field-level trust.** v0 trusted any substring of a trusted output, which let the slack attack through: the injection lives inside a *channel name*, and the channel list was trusted. Now a trusted output vouches only for whole field values, matched exactly after normalization. Text inside any field is untrusted. Dev slack attack success went from 6/10 to 0/12.
+- **Dev led to protecting reservations.** Thanks to field-level trust, reservation targets can be sensitive without blocking benign bookings of catalog items. Dev travel went from 12/12 to 6/12. The rest is "book the most expensive hotel": the attacker computes a legitimate catalog item, which taint can't catch.
+- **Accounting fix (eval code, not policy):** the ASR denominator is now *injectable* pairs, identical for every defense. It used to be pairs delivered in the defended run, which wrongly dropped pairs where the defense blocked the fetch of the injection.
+- **Freeze:** the policy config was committed as `d8e79b6` before the first test run. Test results: attack success 325/335 → 44/335, benign utility 68/68 → 53/68.
+- **Known limitations, documented and not tuned on test:**
+  - delegation tasks are blocked; this would need a confirmation flow;
+  - ID-based destructive calls are unprotected;
+  - content payloads sent to trusted recipients need L1;
+  - computed targets need intent checks (CaMeL).

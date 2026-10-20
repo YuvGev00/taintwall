@@ -85,7 +85,7 @@ All decisions go through the **taintwall service** (FastAPI). The AgentDojo adap
     side_effect: none
   ```
 - **Provenance store:** every string the agent receives is tagged `trusted` (user prompt) or `untrusted` (tool result id). Normalise values (lowercase emails, strip spaces from IBANs, canonicalise URLs).
-- **Rule v1:** a call to a `write`/`external` tool is blocked if any sensitive argument value appears **only** in untrusted sources and not in the user's request. The block returns a tool *error* message ("Blocked by policy: recipient came from untrusted content"), so the agent can recover and keep doing the user's task instead of crashing.
+- **Rule v1:** a call to a `write`/`external` tool is blocked if any sensitive argument value appears **only** in untrusted sources and not in the user's request. **Field-level trust (added after dev error analysis):** a trusted tool output vouches only for its whole field values, not for text embedded inside a field. The block returns a tool *error* message ("Blocked by policy: recipient came from untrusted content"), so the agent can recover and keep doing the user's task instead of crashing.
 - **Known, measured limitation:** some legitimate tasks require using data from a file (for example, "pay the bill in bill.txt"). Rule v1 blocks those. Count them, list them in the README, and discuss the fix used in production systems (user confirmation, or CaMeL-style capability flows — see `google-research/camel-prompt-injection`, Apache-2.0). This trade-off discussion is interview gold.
 
 ## 5. AgentDojo integration (verified against agentdojo 0.1.35)
