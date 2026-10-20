@@ -11,6 +11,8 @@ Token counts are summed over every call logged in `runs/usage/` (resumed session
 | R3 | `gemini-3.5-flash` | Gemini OpenAI-compatible | spotlighting | 478 | 1,931,362 | 29,335 | 30 min |
 | R2 | `gemini-3.1-flash-lite` | Gemini OpenAI-compatible | none | 779 | 5,470,555 | 36,472 | 12 min |
 | R2 | `gemini-3.1-flash-lite` | Gemini OpenAI-compatible | spotlighting | 720 | 4,224,618 | 30,316 | 11 min |
+| R3 | `gemini-3.5-flash` | Gemini OpenAI-compatible | taintwall-l2 | 510 | 2,045,361 | 31,641 | 33 min |
+| R2 | `gemini-3.1-flash-lite` | Gemini OpenAI-compatible | taintwall-l2 | 864 | 5,450,762 | 41,050 | 13 min |
 | R2 (excluded, ASR 4.6% < 20%) | `nvidia/nemotron-3.5-super-vl:free` | OpenRouter | none | 615 | 2,442,837 | 150,639 | 62 min |
 
 ## Money
