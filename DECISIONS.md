@@ -70,3 +70,16 @@ Each entry records what was decided, the alternatives, and why. Keep adding entr
   - So the benchmark can't run any current Claude model without changes.
 - **Decision:** `ClaudeLLM` subclasses AgentDojo's element and overrides only the request: no sampling parameters, adaptive thinking (or none), and an explicit `output_config.effort`. Thinking blocks are passed back unchanged, which AgentDojo's converters already do with signatures.
 - **Upstream contribution:** a PR making `AnthropicLLM` omit sampling parameters when `temperature=None` and support `{"type": "adaptive"}` + effort. Hold it until it has been verified against the live API.
+
+## 2026-10-20: $0 by default
+
+- **Decision:**
+  - All regimes run on free tiers: Gemini API free tier for R3, OpenRouter `:free` tool-calling models for R2, Colab for detector training.
+  - Claude (existing credit) is an optional comparison row only.
+- **Why:**
+  - Hiring signal comes from measurement quality, not spend.
+  - Both free providers are OpenAI-compatible, so they need no new code.
+- **Trade-offs:**
+  - Rate limits make runs slower, so they run overnight and resume.
+  - `:free` model availability changes, so exact model ids and dates are logged with every result.
+  - The Gemini free tier uses content to improve Google's products. Fine for AgentDojo's synthetic environments; never for private data.

@@ -178,8 +178,8 @@ Every claim must therefore come from a regime where the undefended attack actual
 | Regime | What it measures | Models | Cost |
 |---|---|---|---|
 | **R1: hijacked-agent replay** (primary security metric for L2) | For each (user, injection) pair, replay the user task's ground-truth calls, then the attacker's ground-truth calls, through the defense. AgentDojo's checkers score utility and attack success. This is the worst case: an agent that obeys every injection. | none (model-free) | $0, deterministic, runs in CI |
-| **R2: live agents with headroom** (main live table) | BU / UA / ASR on agents that *do* fall for the attack. **Selection rule:** run no-defense on dev first, and keep only models with no-defense ASR ≥ 20%. | open ~8B models (Qwen3 class) via a hosted OpenAI-compatible endpoint; local Ollama for spot checks | low |
-| **R3: frontier utility cost** | What the defense costs a strong model: BU and UA with vs. without the defense. ASR is reported but expected to be ~0, and that is stated explicitly. | claude-haiku-5-5 | ~$20 |
+| **R2: live agents with headroom** (main live table) | BU / UA / ASR on agents that *do* fall for the attack. **Selection rule:** run no-defense on dev first, and keep only models with no-defense ASR ≥ 20%. | free OpenRouter models with tool calling (e.g. `nvidia/nemotron-3.5-super-vl:free`, `xingchen-agi/xing4.0-29b-a4b:free`); local Ollama for spot checks | $0 |
+| **R3: frontier utility cost** | What the defense costs a strong model: BU and UA with vs. without the defense. ASR is reported but expected to be ~0, and that is stated explicitly. | Gemini Flash (free tier, via the OpenAI-compatible endpoint); optional claude-haiku-5-5 from existing credit | $0 (optional ~$10–20) |
 
 **R1 accounting rule (credit: #208).** Run the attacker phase only when a tool result in the user phase actually delivered the injection text. Count pairs where the injection was never delivered as *not attacked* and leave them out of the denominator. Otherwise a defense that blocks the delivery gets scored as a successful attack.
 
@@ -203,7 +203,14 @@ Every claim must therefore come from a regime where the undefended attack actual
 2. Set a provider spending limit.
 3. Use `force_rerun=False` so crashed runs resume.
 
-Two noted gaps: R2 still needs a hosted open-model endpoint (OpenRouter or similar; check prices before committing), and no Sonnet-class headline run is planned, because it would almost certainly sit at ~0% ASR.
+**$0 by default (decided 2026-10-20).**
+- Every regime runs on free tiers. Gemini and OpenRouter both expose OpenAI-compatible APIs, so they run through the existing `openai-compatible` provider with no code change:
+  - Gemini: `TAINTWALL_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`, which supports tools and `reasoning_effort` (minimal…high).
+  - OpenRouter: `https://openrouter.ai/api/v1`.
+- Claude is an optional comparison row from existing credit.
+- Free tiers are rate-limited, so runs are longer. Rely on `force_rerun=False` resumes and overnight runs.
+- `:free` model lists change over time, so every result records the exact model id and run date.
+- No Sonnet-class headline run is planned, because it would almost certainly sit at ~0% ASR.
 
 ## 8. Service
 
