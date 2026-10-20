@@ -116,6 +116,12 @@ Each entry records what was decided, the alternatives, and why. Keep adding entr
   - content payloads sent to trusted recipients need L1;
   - computed targets need intent checks (CaMeL).
 
+## 2026-10-20: R2/R3 dev baselines on Gemini and OpenRouter
+
+- **Free tiers are too small for a dev config.** Gemini: about 20 requests per day per model. OpenRouter free keys: 50 `:free` requests per day. One dev config needs 500-800 calls. Gemini billing was enabled and a $10 OpenRouter credit added (this unlocks 1000 free-model requests per day; `:free` models are not charged). Documented in `results/COSTS.md`.
+- **R2 selection rule applied as written:** `gemini-3.1-flash-lite` 36/87 (41%) passes; `nvidia/nemotron-3.5-super-vl:free` 4/87 (4.6%) fails and gets no spotlighting run. R3 is `gemini-3.5-flash` (0/87, as expected).
+- **R2 deviates from "free models only":** the one model that passed the headroom rule is a paid Gemini model. Dev only, so preliminary.
+
 ## 2026-10-20: L1 dataset — carriers × permissive payloads, split on the span
 
 - **Decision:** build the indirect-injection dataset by inserting one span into a

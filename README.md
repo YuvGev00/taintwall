@@ -55,12 +55,22 @@ Every (user task, injection task) pair is replayed as an agent that obeys every 
   - a malicious link sent to a legitimate recipient (3). The payload is in the message body, which is the detector's (L1) job;
   - booking a hotel the attacker *computes* from a trusted catalog (1). Only intent-level checks such as CaMeL can catch this.
 
-### R2 / R3: live agents
+### R2 / R3: live agents (dev, preliminary)
 
-*Pending.*
-- R2 runs free tool-calling models that actually fall for the attack.
-- R3 measures the utility cost on a frontier model (Gemini free tier, with Claude optional).
-- Every live number will be on the held-out test split with 95% bootstrap CIs.
+**Dev split only, 87 attacked pairs and 29 benign tasks per config, so these are preliminary.** Nothing here is on the held-out test split, and the taintwall defenses are not run yet. The counts are the two AgentDojo baselines: no defense and `spotlighting_with_delimiting`. Counts are k/n; confidence intervals come with the test runs. Raw JSONs are in [`results/`](results/), and model ids, dates and token counts are in [`results/COSTS.md`](results/COSTS.md).
+
+| Regime | Model | Defense | Benign utility | Utility under attack | Attack success |
+|---|---|---|---|---|---|
+| R2 | `gemini-3.1-flash-lite` | none | 26/29 | 52/87 | **36/87 (41%)** |
+| R2 | `gemini-3.1-flash-lite` | spotlighting | 26/29 | 61/87 | 31/87 (36%) |
+| R3 | `gemini-3.5-flash` | none | 29/29 | 81/87 | 0/87 |
+| R3 | `gemini-3.5-flash` | spotlighting | 28/29 | 82/87 | 0/87 |
+
+- **R2 selection rule** (no-defense dev ASR of at least 20%): `gemini-3.1-flash-lite` passes (41%).
+  - `nvidia/nemotron-3.5-super-vl:free` fails the rule: 4/87 (4.6%), all in banking. Its numbers are in `results/` and `COSTS.md` but it is not in the R2 table, and no spotlighting run was made for it.
+  - The second suggested OpenRouter model (`xingchen-agi/xing4.0-29b-a4b:free`) was not run, because a free model takes about an hour per config under OpenRouter's rate limits. R2 therefore has one model so far.
+- **R3 expected result:** `gemini-3.5-flash` ignores the injections (0/87 with and without spotlighting), so it only measures utility cost, not security. Spotlighting changes it by one benign task, which is within noise at n=29.
+- **Cost:** these runs used the Gemini API on a paid billing account (the free tier allows about 20 requests per day per model) and OpenRouter with a $10 credit balance, which unlocks 1000 free-model requests per day. `:free` models are not charged. See `results/COSTS.md`.
 
 ## Evaluation protocol
 
@@ -145,7 +155,7 @@ DECISIONS.md              dated decision log
 - [x] Week 1: harness, frozen split, CI
 - [x] R1 hijacked-agent replay harness, with the no-defense ceiling measured
 - [x] L2 taint policy v1: attack success 97.0% → 13.1% (worst case, test) at a benign-utility cost of 22 points
-- [ ] R2/R3 baselines on free-tier models (no defense plus 2 AgentDojo built-ins)
+- [x] R2/R3 dev baselines (no defense, spotlighting): 1 R2 model passed the headroom rule, 1 R3 model. Still to do: protectai, a second R2 model, and the test split
 - [x] Indirect-injection dataset (23.4k rows, 50/50, span-level splits) and contamination audit (0/23,427 flagged), gated in CI
 - [ ] Fine-tuned detector (ModernBERT): `training/train.ipynb` ready for a free Colab T4; threshold at FPR ≤ 1% on dev vs the protectai baseline
 - [ ] Detection service (FastAPI) and end-to-end L1 results
