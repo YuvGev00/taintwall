@@ -24,7 +24,7 @@ from agentdojo.benchmark import benchmark_suite_with_injections, benchmark_suite
 from agentdojo.logging import OutputLogger
 from agentdojo.task_suite.load_suites import get_suite
 
-from taintwall.adapters.agentdojo import ModelSpec, build_pipeline, run_name
+from taintwall.adapters.agentdojo import DEFENSES, Defense, ModelSpec, build_pipeline, run_name
 from taintwall.eval.splits import load_splits
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -45,7 +45,9 @@ def _result_path(spec: ModelSpec, defense: str, split: str, suite: str) -> Path:
     return RESULTS_DIR / safe_name / split / f"{suite}.json"
 
 
-def run_suite(spec: ModelSpec, suite_name: str, split: str, attack_name: str, defense: str = "none") -> dict[str, Any]:
+def run_suite(
+    spec: ModelSpec, suite_name: str, split: str, attack_name: str, defense: Defense = "none"
+) -> dict[str, Any]:
     splits = load_splits()
     version_ = splits["benchmark_version"]
     suite = get_suite(version_, suite_name)
@@ -53,7 +55,7 @@ def run_suite(spec: ModelSpec, suite_name: str, split: str, attack_name: str, de
     user_tasks = s["user_tasks"][split]  # type: ignore[literal-required]
     injection_tasks = s["injection_tasks"][split]  # type: ignore[literal-required]
 
-    pipeline = build_pipeline(spec, defense="none")
+    pipeline = build_pipeline(spec, defense=defense)
     logdir = RUNS_DIR
 
     started = time.time()
@@ -83,6 +85,7 @@ def run_suite(spec: ModelSpec, suite_name: str, split: str, attack_name: str, de
         "model": spec.model,
         "provider": spec.provider,
         "think": spec.think,
+        "effort": spec.effort if spec.provider == "anthropic" else None,
         "defense": defense,
         "attack": attack_name,
         "benchmark_version": version_,
@@ -137,19 +140,27 @@ def main() -> None:
     parser.add_argument("command", nargs="?", default="run", choices=["run", "summarize"])
     parser.add_argument("--suite", action="append", help="repeatable; default: all four suites")
     parser.add_argument("--split", default="dev", choices=["dev", "test"])
-    parser.add_argument("--provider", default="ollama", choices=["ollama", "openai-compatible"])
+    parser.add_argument("--provider", default="ollama", choices=["ollama", "openai-compatible", "anthropic"])
+    parser.add_argument("--defense", default="none", choices=DEFENSES)
+    parser.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
     parser.add_argument("--model", default="qwen3:8b")
     parser.add_argument("--prose-name", default="Qwen", help="how attacks address the model")
     parser.add_argument("--attack", default="important_instructions")
     parser.add_argument("--no-think", action="store_true", help="ollama: disable reasoning mode")
     args = parser.parse_args()
 
-    spec = ModelSpec(provider=args.provider, model=args.model, prose_name=args.prose_name, think=not args.no_think)
+    spec = ModelSpec(
+        provider=args.provider,
+        model=args.model,
+        prose_name=args.prose_name,
+        think=not args.no_think,
+        effort=args.effort,
+    )
     if args.command == "summarize":
-        print(json.dumps(summarize(spec, args.split), indent=2))
+        print(json.dumps(summarize(spec, args.split, args.defense), indent=2))
         return
     for suite_name in args.suite or ["banking", "slack", "travel", "workspace"]:
-        r = run_suite(spec, suite_name, args.split, args.attack)
+        r = run_suite(spec, suite_name, args.split, args.attack, args.defense)
         b, a = r["benign"], r["under_attack"]
         print(
             f"{suite_name}: BU {b['utility_k']}/{b['n']}  UA {a['utility_k']}/{a['n']}  "

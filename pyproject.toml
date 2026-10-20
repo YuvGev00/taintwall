@@ -21,6 +21,9 @@ requires = ["uv_build>=0.13.1,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+detector = [
+    "agentdojo[transformers]>=0.1.35",
+]
 dev = [
     "mypy>=2.4.0",
     "pre-commit>=4.7.0",

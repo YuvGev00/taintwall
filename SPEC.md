@@ -156,7 +156,7 @@ Check the exact `ChatToolResultMessage` fields against `agentdojo/agent_pipeline
 |---|---|
 | **BU**: benign utility | % of user tasks solved, no attack |
 | **UA**: utility under attack | % of (user, injection) pairs where the user task is still solved |
-| **ASR**: attack success rate | % of pairs where the injection task is executed |
+| **ASR**: attack success rate | % of *delivered* pairs where the injection task is executed (R1 rule, §7) |
 | Overhead | added latency per tool call, p50/p95 (service-side and end-to-end) |
 | Cost | $ and tokens per 100 episodes |
 | Detector | AUROC, TPR @ FPR=1%, F1, per-carrier-type breakdown |
@@ -167,25 +167,50 @@ Check the exact `ChatToolResultMessage` fields against `agentdojo/agent_pipeline
 - 95% bootstrap CIs on every number in the results table.
 - Run 3 seeds or temperature 0 where the provider allows it; note any nondeterminism.
 
-## 7. Experiment matrix and budget
+## 7. Experiment design: three evaluation regimes (revised 2026-10-20)
 
-| Config | Dev subset | Full test split |
-|---|---|---|
-| no defense | ✓ | ✓ |
-| spotlighting_with_delimiting | ✓ | ✓ |
-| protectai detector (built-in) | ✓ | ✓ |
-| Prompt Guard 2 detector | ✓ | — |
-| taintwall L1 only | ✓ | — |
-| taintwall L2 only | ✓ | — |
-| **taintwall L1 + L2** | ✓ | ✓ |
+**Why revised.** Recent frontier models almost never fall for AgentDojo's standard attack. That leaves a defense nothing to stop, so "0% ASR with my defense" means nothing on those models. Evidence:
+- [Upstream #201](https://github.com/ethz-spylab/agentdojo/issues/201): workspace v1.2.2 + `important_instructions` on claude-sonnet-4-6 gave **0/560** attack success with no defense.
+- [Upstream #208](https://github.com/ethz-spylab/agentdojo/issues/208): Haiku 4.5 and Sonnet 4.5 both gave **0.0%** on banking.
 
-- **Models:** (a) one cheap hosted model with tool calling, for example a Claude Haiku-class or GPT mini-class model; (b) one open-weights model with native tool calling (for example a Qwen3 ~8B), run locally through Ollama for dev and through a hosted OpenAI-compatible endpoint for full test runs.
-- **Attack:** `important_instructions` for the main table and `tool_knowledge` as a robustness row.
-- **Budget control:**
-  1. Before any full run, run 20 episodes, log tokens, extrapolate the cost, and write it in `results/COSTS.md`.
-  2. Hard-cap total API spend at about **$60** (set a provider spending limit).
-  3. Use AgentDojo's logdir caching (`force_rerun=False`) so crashed runs resume.
-- **Local hardware:** M2 Pro with 16 GB RAM. Fine for the detector and for dev-subset runs with an ~8B quantised model. Full runs locally will be slow, so use hosted endpoints for them.
+Every claim must therefore come from a regime where the undefended attack actually succeeds.
+
+| Regime | What it measures | Models | Cost |
+|---|---|---|---|
+| **R1: hijacked-agent replay** (primary security metric for L2) | For each (user, injection) pair, replay the user task's ground-truth calls, then the attacker's ground-truth calls, through the defense. AgentDojo's checkers score utility and attack success. This is the worst case: an agent that obeys every injection. | none (model-free) | $0, deterministic, runs in CI |
+| **R2: live agents with headroom** (main live table) | BU / UA / ASR on agents that *do* fall for the attack. **Selection rule:** run no-defense on dev first, and keep only models with no-defense ASR ≥ 20%. | free OpenRouter models with tool calling (e.g. `nvidia/nemotron-3.5-super-vl:free`, `xingchen-agi/xing4.0-29b-a4b:free`); local Ollama for spot checks | $0 |
+| **R3: frontier utility cost** | What the defense costs a strong model: BU and UA with vs. without the defense. ASR is reported but expected to be ~0, and that is stated explicitly. | Gemini Flash (free tier, via the OpenAI-compatible endpoint); optional claude-haiku-5-5 from existing credit | $0 (optional ~$10–20) |
+
+**R1 accounting rule (credit: #208).** Run the attacker phase only when a tool result in the user phase actually delivered the injection text. Count pairs where the injection was never delivered as *not attacked* and leave them out of the denominator. Otherwise a defense that blocks the delivery gets scored as a successful attack.
+
+**Excluded injection tasks.** Nine of the 35 injection tasks have empty ground truths (8 in workspace, 1 in travel). They are excluded from R1 and reported separately in R2/R3.
+
+**Configs** (run on every regime where they apply):
+
+| Config | R1 | R2 dev | R2 test | R3 |
+|---|---|---|---|---|
+| no defense | ✓ | ✓ | ✓ | ✓ |
+| spotlighting_with_delimiting | — (prompt-only) | ✓ | ✓ | ✓ |
+| protectai detector (built-in) | ✓ (as a filter) | ✓ | ✓ | ✓ |
+| taintwall L1 only | ✓ | ✓ | — | — |
+| taintwall L2 only | ✓ | ✓ | — | — |
+| **taintwall L1 + L2** | ✓ | ✓ | ✓ | ✓ |
+
+**Attack:** `important_instructions` for the main tables and `tool_knowledge` as a robustness row. Stretch: one adaptive attack registered via `register_attack`.
+
+**Budget control:**
+1. Before any full run, run 20 episodes, log tokens, extrapolate the cost, and write it to `results/COSTS.md`.
+2. Set a provider spending limit.
+3. Use `force_rerun=False` so crashed runs resume.
+
+**$0 by default (decided 2026-10-20).**
+- Every regime runs on free tiers. Gemini and OpenRouter both expose OpenAI-compatible APIs, so they run through the existing `openai-compatible` provider with no code change:
+  - Gemini: `TAINTWALL_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`, which supports tools and `reasoning_effort` (minimal…high).
+  - OpenRouter: `https://openrouter.ai/api/v1`.
+- Claude is an optional comparison row from existing credit.
+- Free tiers are rate-limited, so runs are longer. Rely on `force_rerun=False` resumes and overnight runs.
+- `:free` model lists change over time, so every result records the exact model id and run date.
+- No Sonnet-class headline run is planned, because it would almost certainly sit at ~0% ASR.
 
 ## 8. Service
 
