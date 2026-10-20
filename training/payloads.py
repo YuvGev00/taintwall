@@ -62,7 +62,7 @@ def stable_hash(*parts: str) -> int:
 
 def stream_hf_spans() -> Iterator[Span]:
     """Every row of the four seed datasets that we use, both labels; de-duplicated later."""
-    from datasets import load_dataset  # type: ignore[attr-defined]
+    from datasets import load_dataset  # type: ignore[attr-defined,unused-ignore]
 
     def rows(name: str) -> Iterator[dict[str, object]]:
         for split in ("train", "validation", "test"):

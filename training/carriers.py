@@ -316,7 +316,7 @@ def _clip_sentences(text: str, max_chars: int) -> str:
 
 
 def stream_amazon_reviews(n: int, seed: int, max_chars: int = 900) -> Iterator[Carrier]:
-    from datasets import load_dataset  # type: ignore[attr-defined]
+    from datasets import load_dataset  # type: ignore[attr-defined,unused-ignore]
 
     name = "fancyzhx/amazon_polarity"
     ds = load_dataset(name, split="train", streaming=True, revision=HF_REVISIONS[name])
@@ -333,7 +333,7 @@ def stream_amazon_reviews(n: int, seed: int, max_chars: int = 900) -> Iterator[C
 
 
 def stream_web_pages(n: int, seed: int, max_chars: int = 1100) -> Iterator[Carrier]:
-    from datasets import load_dataset  # type: ignore[attr-defined]
+    from datasets import load_dataset  # type: ignore[attr-defined,unused-ignore]
 
     name = "HuggingFaceFW/fineweb-edu"
     ds = load_dataset(name, name="sample-10BT", split="train", streaming=True, revision=HF_REVISIONS[name])
