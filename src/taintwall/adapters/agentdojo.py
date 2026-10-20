@@ -7,10 +7,13 @@ sections 5 and 7.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import anthropic
@@ -49,13 +52,23 @@ DEFENSES: tuple[Defense, ...] = ("none", "spotlighting", "protectai")
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 _EMPTY_ENV = EmptyEnv()
 
+USAGE_DIR = Path(__file__).resolve().parents[3] / "runs" / "usage"  # gitignored with runs/
+RETRY_ERRORS = (openai.RateLimitError, openai.APIConnectionError, openai.InternalServerError)
+MAX_ATTEMPTS = 8
+
 
 class DeterministicOpenAILLM(OpenAILLM):
     """OpenAILLM that really sends temperature=0.
 
     agentdojo 0.1.35 sends `temperature or NOT_GIVEN`, so 0.0 is dropped and the
     server default (often 0.6-0.8) is used instead. See DECISIONS.md, 2026-10-19.
+
+    Also retries rate-limit and server errors with backoff (free tiers are rate-limited)
+    and appends each call's token usage to `usage_path` (JSONL), so the totals
+    survive a resumed run.
     """
+
+    usage_path: Path | None = None
 
     def query(
         self,
@@ -76,9 +89,28 @@ class DeterministicOpenAILLM(OpenAILLM):
             request["temperature"] = self.temperature
         if self.reasoning_effort is not None:
             request["reasoning_effort"] = self.reasoning_effort
-        completion = self.client.chat.completions.create(**request)
+        completion = self._create_with_backoff(request)
+        self._log_usage(completion)
         output = _openai_to_assistant_message(completion.choices[0].message)
         return query, runtime, env, [*messages, output], extra_args
+
+    def _create_with_backoff(self, request: dict[str, Any]) -> Any:
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                return self.client.chat.completions.create(**request)
+            except RETRY_ERRORS:
+                if attempt == MAX_ATTEMPTS - 1:
+                    raise
+                time.sleep(min(10 * 2**attempt, 120))
+        raise AssertionError("unreachable")
+
+    def _log_usage(self, completion: Any) -> None:
+        if self.usage_path is None or completion.usage is None:
+            return
+        self.usage_path.parent.mkdir(parents=True, exist_ok=True)
+        row = {"prompt": completion.usage.prompt_tokens, "completion": completion.usage.completion_tokens}
+        with self.usage_path.open("a") as f:
+            f.write(json.dumps(row) + "\n")
 
 
 _VALID_TOOL_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
@@ -174,6 +206,7 @@ def make_llm(spec: ModelSpec) -> BasePipelineElement:
         client = openai.OpenAI(
             base_url=os.environ["TAINTWALL_BASE_URL"],
             api_key=os.environ["TAINTWALL_API_KEY"],
+            max_retries=0,  # DeterministicOpenAILLM retries with its own, longer backoff
         )
         return DeterministicOpenAILLM(client, spec.model, temperature=0.0)
     if spec.provider == "anthropic":
@@ -191,6 +224,8 @@ def build_pipeline(spec: ModelSpec, defense: Defense = "none", llm: BasePipeline
         raise NotImplementedError(f"defense {defense!r} is not implemented yet")
     register_model_name(spec.model, spec.prose_name)
     llm = llm if llm is not None else make_llm(spec)
+    if isinstance(llm, DeterministicOpenAILLM):
+        llm.usage_path = USAGE_DIR / f"{_safe(run_name(spec, defense))}.jsonl"
     system_message = load_system_message(None)
 
     if defense == "spotlighting":
@@ -220,6 +255,10 @@ def build_pipeline(spec: ModelSpec, defense: Defense = "none", llm: BasePipeline
     # AgentDojo also caches traces under it, so it must differ per config.
     pipeline.name = run_name(spec, defense)
     return pipeline
+
+
+def _safe(name: str) -> str:
+    return name.replace("/", "_").replace(":", "_")
 
 
 def run_name(spec: ModelSpec, defense: str) -> str:
