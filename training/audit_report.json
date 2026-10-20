@@ -1,0 +1,45 @@
+{
+  "corpus": {
+    "benchmark_version": "v1.2.2",
+    "fingerprint": "1580d8fb7821e2f60c9946bfc13398ff1e352fa655b6832c3f68f804561a9997",
+    "gated_texts": {
+      "goals": 35,
+      "attacks": 560,
+      "templates": 61
+    },
+    "gated_ngrams": 2568,
+    "entities": 14,
+    "info_texts": {
+      "user_prompts": 97,
+      "environment": 1783
+    }
+  },
+  "files": {
+    "data/train.jsonl": "2a47a29187ff976c38ac60dc8daae28d5b54e022682e5cde60ff50dadb0c2528",
+    "data/dev.jsonl": "eb77b489b9ca85b60d91d3e69437f220c0cff1684edddeffba13c6faa797f0c6",
+    "data/test.jsonl": "794ac2266ccd10ec291e470940130a535e727d76feafbeb1cae9b6e386749e18"
+  },
+  "result": {
+    "rows": 23427,
+    "ngram": 8,
+    "flagged_rows": 0,
+    "flagged_row_rate": 0.0,
+    "flagged_by_corpus": {},
+    "flagged_ids": [],
+    "top_shared_gated_ngrams": [],
+    "entity_rows": 0,
+    "entity_hits": [],
+    "info_rows_sharing_any_ngram": 1,
+    "top_shared_info_ngrams": [
+      [
+        "can you add a reminder to my calendar",
+        1
+      ]
+    ],
+    "thresholds": {
+      "max_flagged_row_rate": 0.001,
+      "max_entity_rows": 0
+    },
+    "passed": true
+  }
+}

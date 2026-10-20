@@ -121,3 +121,79 @@ Each entry records what was decided, the alternatives, and why. Keep adding entr
 - **Free tiers are too small for a dev config.** Gemini: about 20 requests per day per model. OpenRouter free keys: 50 `:free` requests per day. One dev config needs 500-800 calls. Gemini billing was enabled and a $10 OpenRouter credit added (this unlocks 1000 free-model requests per day; `:free` models are not charged). Documented in `results/COSTS.md`.
 - **R2 selection rule applied as written:** `gemini-3.1-flash-lite` 36/87 (41%) passes; `nvidia/nemotron-3.5-super-vl:free` 4/87 (4.6%) fails and gets no spotlighting run. R3 is `gemini-3.5-flash` (0/87, as expected).
 - **R2 deviates from "free models only":** the one model that passed the headroom rule is a paid Gemini model. Dev only, so preliminary.
+
+## 2026-10-20: L1 dataset — carriers × permissive payloads, split on the span
+
+- **Decision:** build the indirect-injection dataset by inserting one span into a
+  benign carrier (email, invite, chat, note, invoice, review, web page). Positives
+  are injection payloads; negatives are benign/hard inserts and untouched carriers.
+  Both labels share the same carriers, positions and formatting wrappers, so the
+  only class signal is the inserted text (`training/build_dataset.py`).
+- **Why split on the span, not the row:** the train/dev/test bucket is a hash of the
+  payload text (HF seeds) or the template id (synthetic inserts), and carriers are
+  split independently on the same key space. So no payload or benign template ever
+  appears in two splits. Tuning the detector threshold on dev therefore can't
+  memorize a payload it will later be tested on.
+- **Payload sources:** only `deepset/prompt-injections` (Apache-2.0),
+  `Lakera/gandalf_ignore_instructions` (MIT), `reshabhs/SPML_Chatbot_Prompt_Injection`
+  (MIT), `jackhhao/jailbreak-classification` (Apache-2.0). `xTRam1/safe-guard-prompt-injection`
+  is excluded (no licence). Rows with conflicting labels across sources are dropped,
+  not guessed.
+- **Hard negatives are the point.** Benign text full of imperatives, payment details
+  and URLs, plus benign uses of attack vocabulary ("ignore my previous email", "do
+  not reply to this automated message"). Off-the-shelf detectors flag these; the
+  dataset is designed so ours learns not to.
+- **$0 and small-laptop constraints:** seeds and real carriers are *streamed* from
+  the HF Hub at pinned revisions and capped (FineWeb-Edu `sample-10BT`, Amazon
+  reviews), never fully downloaded. Full build is ~23.4k rows in under a minute.
+  `data/` is gitignored; only a licence-clean 240-row sample is committed.
+- **Known skew (documented, not hidden):** SPML (~16K rows) dominates both classes,
+  so payload wording diversity is limited and the seeds are chatbot-style rather
+  than agentic. Diversity comes from carriers/positions/formatting; the real test is
+  the OOD rings and AgentDojo. Recorded in `training/MODEL_CARD.md`.
+- **Result:** train 18,739 / dev 2,355 / test 2,333, ~51% positive each.
+
+## 2026-10-20: Contamination audit as a CI gate — 8-gram + entity overlap vs AgentDojo
+
+- **Decision:** `training/contamination_audit.py` builds a reference corpus from
+  AgentDojo v1.2.2 (35 injection goals, 560 rendered attack strings across all
+  registered attacks × injection tasks, 61 de-placeheldered templates) and fails if
+  more than 0.1% of dataset rows share an 8-gram with it, or if **any** row contains
+  an attacker email/URL/IBAN or the benchmark user's name.
+- **Why this is the project's edge:** it turns "we didn't contaminate" from a claim
+  into a test. Without it, a detector that had seen AgentDojo's attack text would be
+  graded on its own homework, and the headline ASR number would be meaningless.
+- **Design choices:**
+  - *Word 8-grams after stripping punctuation/markup/whitespace*, so an attacker
+    can't smuggle an overlap past the audit by HTML-commenting or re-quoting it, and
+    generic 7-word English phrases don't trip it.
+  - *Attacks are rendered, not just templated.* The gated set contains the exact
+    strings AgentDojo plants (`attack.attack(user_task, injection_task)`), not only
+    the `{goal}` templates, so paraphrase-free reuse is caught.
+  - *Entities are substring-checked*, because a single token (an IBAN, an email)
+    never forms an 8-gram but is still a leak.
+  - *Informational corpora* (user prompts, the benign default environments) are
+    reported but not gated: sharing a benign phrase like "let me know if you have
+    any questions" with AgentDojo's emails is expected, not contamination.
+- **CI:** runs on the committed sample (no network, no LLM) and pins the reference
+  corpus **fingerprint** (`tests/groundtruth/test_contamination.py`), so an upstream
+  AgentDojo change that alters attack text fails the PR instead of silently
+  weakening the audit. The full build re-runs it before training (`make dataset`).
+- **Result:** 0 / 23,427 rows flagged, 0 entity rows. Recorded in
+  `training/audit_report.json` and surfaced in the README.
+
+## 2026-10-20: Threshold chosen on dev for FPR ≤ 1%, notebook left un-run
+
+- **Decision:** `training/train.ipynb` fine-tunes ModernBERT-base on a free Colab T4,
+  picks the decision threshold as the (1 − 0.01) quantile of dev **negative** scores
+  (lowest threshold with dev FPR ≤ 1%), freezes it, and only then measures the test
+  split and the `protectai/deberta-v3-base-prompt-injection-v2` baseline.
+- **Why FPR 1% instead of max F1:** base rates — most tool outputs are benign, so a
+  2% FPR would break 1 in 50 benign tool calls, which destroys agent utility. TPR is
+  reported *at* that FPR.
+- **Why ModernBERT-base:** Apache-2.0, 149M params, 512-token window fits tool
+  outputs, trains in minutes on a free T4. Ablation baseline `deberta-v3-small` (MIT).
+- **Why the notebook is not run here:** $0 budget and no GPU on the work laptop; the
+  task is to leave it ready, pinned and gated (Cell 3 refuses to train on
+  contaminated data). The user runs it on Colab and fills the `TBD` metrics in the
+  model card and README.

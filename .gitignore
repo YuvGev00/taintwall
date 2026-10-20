@@ -15,3 +15,6 @@ runs/
 .env.*
 *.log
 .DS_Store
+
+# L1 detector data: full sets are regenerable (training/build_dataset.py); the sample is committed
+data/
