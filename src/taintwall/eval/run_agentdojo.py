@@ -24,7 +24,7 @@ from agentdojo.benchmark import benchmark_suite_with_injections, benchmark_suite
 from agentdojo.logging import OutputLogger
 from agentdojo.task_suite.load_suites import get_suite
 
-from taintwall.adapters.agentdojo import DEFENSES, USAGE_DIR, Defense, ModelSpec, _safe, build_pipeline, run_name
+from taintwall.adapters.agentdojo import DEFENSES, Defense, ModelSpec, build_pipeline, run_name
 from taintwall.eval.splits import load_splits
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -41,7 +41,8 @@ def _git_commit() -> str:
 
 
 def _result_path(spec: ModelSpec, defense: str, split: str, suite: str) -> Path:
-    return RESULTS_DIR / _safe(run_name(spec, defense)) / split / f"{suite}.json"
+    safe_name = run_name(spec, defense).replace("/", "_").replace(":", "_")
+    return RESULTS_DIR / safe_name / split / f"{suite}.json"
 
 
 def run_suite(
@@ -118,17 +119,6 @@ def run_suite(
     return result
 
 
-def token_usage(spec: ModelSpec, defense: str) -> dict[str, int]:
-    """Total tokens over every call ever logged for this config (all resumed sessions, all splits)."""
-    path = USAGE_DIR / f"{_safe(run_name(spec, defense))}.jsonl"
-    rows = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
-    return {
-        "calls": len(rows),
-        "prompt_tokens": sum(r["prompt"] for r in rows),
-        "completion_tokens": sum(r["completion"] for r in rows),
-    }
-
-
 def summarize(spec: ModelSpec, split: str, defense: str = "none") -> dict[str, Any]:
     folder = _result_path(spec, defense, split, "x").parent
     rows = [json.loads(p.read_text()) for p in sorted(folder.glob("*.json")) if p.name != "summary.json"]
@@ -140,7 +130,6 @@ def summarize(spec: ModelSpec, split: str, defense: str = "none") -> dict[str, A
         "attack_utility_k": sum(r["under_attack"]["utility_k"] for r in rows),
         "attack_success_k": sum(r["under_attack"]["attack_success_k"] for r in rows),
         "wall_seconds": round(sum(r["wall_seconds"] for r in rows), 1),
-        "tokens": token_usage(spec, defense),
     }
     (folder / "summary.json").write_text(json.dumps(total, indent=2) + "\n")
     return total
