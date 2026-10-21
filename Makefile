@@ -1,4 +1,4 @@
-.PHONY: dev lint test splits r1 eval-dev summarize-dev dataset audit
+.PHONY: serve loadtest dev lint test splits r1 eval-dev summarize-dev dataset audit
 
 MODEL ?= qwen3:8b
 
@@ -40,3 +40,10 @@ eval-dev:
 
 summarize-dev:
 	uv run python -m taintwall.eval.run_agentdojo summarize --split dev --model $(MODEL)
+
+serve:
+	uv run uvicorn taintwall.api.app:app --port 8000
+
+# Needs `make serve` running; see results/LOADTEST.md.
+loadtest:
+	uv run locust -f loadtest/locustfile.py --headless -u 200 -r 50 -t 75s --host http://localhost:8000

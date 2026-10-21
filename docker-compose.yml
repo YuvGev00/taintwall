@@ -1,0 +1,29 @@
+services:
+  api:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      TAINTWALL_DATABASE_URL: postgresql://taintwall:taintwall@postgres:5432/taintwall
+      TAINTWALL_DETECTOR: ${TAINTWALL_DETECTOR:-noop}
+      # Tracing is exported only when this is set; `docker compose --profile tracing up` starts Jaeger.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: taintwall, POSTGRES_PASSWORD: taintwall, POSTGRES_DB: taintwall}
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taintwall"]
+      interval: 3s
+      retries: 20
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    profiles: [tracing]
+    environment: {COLLECTOR_OTLP_ENABLED: "true"}
+    ports: ["16686:16686"]
+
+volumes:
+  pgdata:

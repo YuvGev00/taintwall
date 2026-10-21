@@ -235,3 +235,18 @@ R1 worst case, test split (335 injectable pairs):
 - Next steps if pursued: more diverse real carriers, adversarial paraphrases, and early stopping on an out-of-distribution validation set.
 
 **Weights:** ~600 MB, left on Colab. Downloading them through the browser hangs. They are not needed for these results, because the replays ran on Colab next to the weights (`training/colab_l1_eval.sh`).
+
+## 2026-10-21: Service design
+
+- **Decision:** the service stores each session's tool outputs and rebuilds the existing `Provenance` from them on
+  every `tool_call` check, instead of keeping provenance in memory. Storage is SQLAlchemy over SQLite (WAL) by
+  default and Postgres by URL.
+- **Why:** stateless workers behave identically across restarts and replicas, and the same policy code runs
+  unchanged (the parity test proves it). The cost is O(history) per call, measured in `results/LOADTEST.md`;
+  a per-session cache is the obvious next step if it matters.
+- **Redacted outputs are still recorded** as untrusted provenance: the agent never sees them, but a value that
+  appears only in them must not become trusted.
+- **Detector interface** is one method (`score(text) -> float`); the threshold lives in the service so the L1
+  model can be swapped without touching the API. Sync handlers, so model/DB calls run in the threadpool.
+- **Not done:** auth, rate limiting, and a Postgres load run (SQLite serializes writes).
+
