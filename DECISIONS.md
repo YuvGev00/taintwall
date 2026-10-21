@@ -205,3 +205,18 @@ Each entry records what was decided, the alternatives, and why. Keep adding entr
   task is to leave it ready, pinned and gated (Cell 3 refuses to train on
   contaminated data). The user runs it on Colab and fills the `TBD` metrics in the
   model card and README.
+
+## 2026-10-21: Service design
+
+- **Decision:** the service stores each session's tool outputs and rebuilds the existing `Provenance` from them on
+  every `tool_call` check, instead of keeping provenance in memory. Storage is SQLAlchemy over SQLite (WAL) by
+  default and Postgres by URL.
+- **Why:** stateless workers behave identically across restarts and replicas, and the same policy code runs
+  unchanged (the parity test proves it). The cost is O(history) per call, measured in `results/LOADTEST.md`;
+  a per-session cache is the obvious next step if it matters.
+- **Redacted outputs are still recorded** as untrusted provenance: the agent never sees them, but a value that
+  appears only in them must not become trusted.
+- **Detector interface** is one method (`score(text) -> float`); the threshold lives in the service so the L1
+  model can be swapped without touching the API. Sync handlers, so model/DB calls run in the threadpool.
+- **Not done:** auth, rate limiting, and a Postgres load run (SQLite serializes writes).
+

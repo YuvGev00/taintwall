@@ -80,6 +80,29 @@ Every (user task, injection task) pair is replayed as an agent that obeys every 
 - **R3 expected result:** `gemini-3.5-flash` ignores the injections (0/87 with and without spotlighting), so it only measures utility cost, not security. Spotlighting changes it by one benign task, which is within noise at n=29.
 - **Cost:** these runs used the Gemini API on a paid billing account (the free tier allows about 20 requests per day per model) and OpenRouter with a $10 credit balance, which unlocks 1000 free-model requests per day. `:free` models are not charged. See `results/COSTS.md`.
 
+## Service
+
+A FastAPI service wraps both layers (SPEC §8). Sessions keep per-session provenance, so the policy sees what the agent's tools returned.
+
+```bash
+make serve                       # http://localhost:8000/docs, SQLite in ./taintwall.db
+docker compose up --build        # api + Postgres 16; add --profile tracing for Jaeger
+```
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /v1/sessions` `{suite, user_prompt}` | start a session (suite = a file in `policies/`) |
+| `POST /v1/check/tool_output` `{session_id, tool_name, text}` | L1 verdict: `allow` or `redact`; the text is recorded as untrusted provenance |
+| `POST /v1/check/tool_call` `{session_id, tool_name, args}` | L2 verdict: `allow` or `block`, with reason and `tainted_args` |
+| `GET /v1/sessions/{id}/trace` | every output and decision, in order |
+| `GET /healthz`, `GET /metrics` | liveness, Prometheus |
+
+- **Detector:** pluggable (`Detector.score(text) -> float`), default no-op. `TAINTWALL_DETECTOR=protectai` after `uv sync --group detector`. Verdicts are cached in an LRU keyed by `sha256(text)`.
+- **Storage:** `TAINTWALL_DATABASE_URL` (`sqlite:///...` default, or `postgresql://...`).
+- **Tracing:** set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://jaeger:4318` with the `tracing` profile; UI on :16686).
+- **Parity test:** `tests/api/test_replay_parity.py` replays the banking and slack dev hijacked-agent traces through HTTP and asserts identical decisions to the in-process policy.
+- **Load test:** ~530 RPS total on a laptop at 200 concurrent sessions, 0 failures; per-endpoint p50/p95/p99 and caveats in [results/LOADTEST.md](results/LOADTEST.md).
+
 ## Evaluation protocol
 
 - **Benchmark:** AgentDojo `v1.2.2`: 4 suites (workspace, travel, banking, slack), 97 user tasks, 35 injection tasks, and the `important_instructions` attack.
@@ -167,7 +190,7 @@ DECISIONS.md              dated decision log
 - [x] ProtectAI and ProtectAI + L2 in R1 (dev and test)
 - [x] Indirect-injection dataset (23.4k rows, 50/50, span-level splits) and contamination audit (0/23,427 flagged), gated in CI
 - [ ] Fine-tuned detector (ModernBERT): `training/train.ipynb` ready for a free Colab T4; threshold at FPR ≤ 1% on dev vs the protectai baseline
-- [ ] Detection service (FastAPI) and end-to-end L1 results
+- [x] Service (FastAPI + SQLite/Postgres + Prometheus + OpenTelemetry + Docker) and load test; [ ] end-to-end L1 results
 - [ ] Ablations, frozen config, full test-split runs with paired statistics
 - [ ] Traces, load test, demo, write-up
 
