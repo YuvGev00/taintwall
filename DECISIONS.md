@@ -205,3 +205,48 @@ Each entry records what was decided, the alternatives, and why. Keep adding entr
   task is to leave it ready, pinned and gated (Cell 3 refuses to train on
   contaminated data). The user runs it on Colab and fills the `TBD` metrics in the
   model card and README.
+
+## 2026-10-21: L1 results. Wins in-distribution, loses on real agent injections
+
+Trained on a Colab T4 with the frozen recipe (ModernBERT-base, 2 epochs, effective batch 32). The threshold was chosen on dev for FPR ≤ 1% and then frozen.
+
+| | Synthetic test: TPR / FPR / AUROC | InjecAgent (OOD) AUROC |
+|---|---|---|
+| **taintwall L1** | **95.6% / 1.5% / 0.996** | 0.671 |
+| ProtectAI (same dev-threshold rule) | 84.7% / 3.2% / 0.962 | **0.781** |
+
+R1 worst case, test split (335 injectable pairs):
+
+| Defense | Attack success | Benign utility |
+|---|---|---|
+| L1 | 154/335 | 68/68 |
+| ProtectAI | 88/335 | — |
+| L2 | 44/335 | 53/68 |
+| **L1 + L2** | **26/335** | 53/68 |
+| ProtectAI + L2 | 13/335 | 57/68 |
+
+**What this means:**
+- L1 beats ProtectAI on data shaped like its training set, but generalizes worse to real injections, both InjecAgent and AgentDojo's own.
+- The training loss reached ~1e-4 early. The model learned artifacts of the synthetic carrier × payload construction rather than the concept.
+- The detector to ship is ProtectAI + L2. L1 stays as a documented negative result about synthetic-data detectors.
+
+**Not done, deliberately:**
+- No re-tuning after seeing test or AgentDojo.
+- Next steps if pursued: more diverse real carriers, adversarial paraphrases, and early stopping on an out-of-distribution validation set.
+
+**Weights:** ~600 MB, left on Colab. Downloading them through the browser hangs. They are not needed for these results, because the replays ran on Colab next to the weights (`training/colab_l1_eval.sh`).
+
+## 2026-10-21: Service design
+
+- **Decision:** the service stores each session's tool outputs and rebuilds the existing `Provenance` from them on
+  every `tool_call` check, instead of keeping provenance in memory. Storage is SQLAlchemy over SQLite (WAL) by
+  default and Postgres by URL.
+- **Why:** stateless workers behave identically across restarts and replicas, and the same policy code runs
+  unchanged (the parity test proves it). The cost is O(history) per call, measured in `results/LOADTEST.md`;
+  a per-session cache is the obvious next step if it matters.
+- **Redacted outputs are still recorded** as untrusted provenance: the agent never sees them, but a value that
+  appears only in them must not become trusted.
+- **Detector interface** is one method (`score(text) -> float`); the threshold lives in the service so the L1
+  model can be swapped without touching the API. Sync handlers, so model/DB calls run in the threadpool.
+- **Not done:** auth, rate limiting, and a Postgres load run (SQLite serializes writes).
+

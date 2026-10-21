@@ -11,10 +11,18 @@ requires-python = ">=3.12"
 dependencies = [
     "agentdojo>=0.1.35",
     "anthropic>=1.15.0",
+    "fastapi>=0.156.8",
     "httpx>=0.28.1",
     "openai>=3.35.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-instrumentation-fastapi>=0.66b1",
+    "opentelemetry-sdk>=1.45.1",
+    "prometheus-client>=0.26.0",
+    "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pyyaml>=6.0.3",
+    "sqlalchemy>=2.1.5",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [build-system]
@@ -26,6 +34,7 @@ detector = [
     "agentdojo[transformers]>=0.1.35",
 ]
 dev = [
+    "locust>=2.46.7",
     "mypy>=2.4.0",
     "pre-commit>=4.7.0",
     "pytest>=9.1.1",
@@ -53,9 +62,14 @@ python_version = "3.12"
 files = ["src", "training"]
 
 [[tool.mypy.overrides]]
-module = ["agentdojo.*", "datasets.*", "transformers.*"]
+module = ["agentdojo.*", "datasets.*", "transformers.*", "torch.*", "modal.*"]
 ignore_missing_imports = true
 follow_untyped_imports = true
+
+# Modal's decorators are untyped when the optional client isn't installed (it isn't in CI).
+[[tool.mypy.overrides]]
+module = ["training.modal_train"]
+disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
