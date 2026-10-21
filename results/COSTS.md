@@ -26,3 +26,22 @@ Token counts are summed over every call logged in `runs/usage/` (resumed session
 - Gemini 3 models require each tool call's `thought_signature` to be echoed back; the adapter does that.
 - OpenRouter sometimes answers a rate-limited request with a 200 and no `choices`; the adapter retries those. The first Nemotron run crashed on this and was resumed (AgentDojo skips finished episodes).
 - `gemini-2.5-flash` is closed to new users; `gemini-3.5-flash` was used as "Gemini Flash".
+
+## Test-split cost estimate (2026-10-21, before any test run)
+
+Measured on 20 test episodes (banking, 4 user tasks x 5 injection tasks, no defense, temperature 0):
+`gemini-3.1-flash-lite` 368,036 prompt / 5,787 completion tokens (144 calls); `gemini-3.5-flash` 160,680 / 3,443 (74 calls).
+Banking is the lightest suite, so the projection below instead scales the per-config dev totals above by test/dev episode count (403 / 116 = 3.47).
+List prices (third-party aggregators, not read from Google's console): flash-lite $0.25 in / $1.50 out per M tokens; 3.5-flash $1.50 / $9.00.
+
+| Config | Projected prompt tokens | Projected $ |
+|---|---|---|
+| R2 flash-lite none | 19.0 M | 4.8 |
+| R2 flash-lite spotlighting | 14.7 M | 3.7 |
+| R2 flash-lite protectai (assumed = none) | 19.0 M | 4.8 |
+| R2 flash-lite taintwall-l2 | 18.9 M | 4.8 |
+| R3 3.5-flash none | 6.6 M | 11.4 |
+| R3 3.5-flash taintwall-l2 | 7.1 M | 11.9 |
+| **Total** | **85 M** | **about 41** |
+
+This exceeds the ~$15 budget, so the full test runs wait for approval.
