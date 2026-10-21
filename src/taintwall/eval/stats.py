@@ -64,4 +64,4 @@ def mcnemar_exact(a: Sequence[bool | int], b: Sequence[bool | int]) -> float:
     if n == 0:
         return 1.0
     tail = sum(comb(n, i) for i in range(min(only_a, only_b) + 1)) / 2**n
-    return min(1.0, 2 * tail)
+    return float(min(1.0, 2 * tail))
