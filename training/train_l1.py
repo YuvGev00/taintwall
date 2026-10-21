@@ -38,6 +38,8 @@ SCORES_PATH = ROOT / "runs" / "l1_scores.json"
 BASE_MODEL = "answerdotai/ModernBERT-base"
 PROTECTAI_MODEL = "protectai/deberta-v3-base-prompt-injection-v2"
 MAX_LEN = 512
+MICRO_BATCH = 8
+"""Rows per forward pass; gradients accumulate up to BATCH (fits a 16 GB T4)."""
 TARGET_FPR = 0.01
 SEED = 20261020
 EPOCHS = 2
@@ -88,7 +90,7 @@ def pick_device() -> str:
     return "cpu"
 
 
-def batched_probs(model: Any, tok: Any, texts: list[str], device: str, positive: int, bs: int = 64) -> list[float]:
+def batched_probs(model: Any, tok: Any, texts: list[str], device: str, positive: int, bs: int = 16) -> list[float]:
     """P(positive class) per text, in input order; length-sorted batches keep padding low."""
     import torch
 
@@ -123,8 +125,16 @@ def train(train_rows: list[Row], device: str, log: Callable[[str], None] = print
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda step: step / max(1, warmup) if step < warmup else max(0.0, (total - step) / max(1, total - warmup))
     )
-    # bf16 autocast where the GPU supports it (L4, A100); fp32 on a T4, MPS or CPU.
-    autocast = device == "cuda" and torch.cuda.is_bf16_supported()
+    # Mixed precision on CUDA: bf16 where supported (L4, A100), fp16 + loss scaling on a
+    # T4. A batch of 32 x 512 tokens in fp32 does not fit a 16 GB T4 (OOM on Colab,
+    # 2026-10-21), so each batch of BATCH rows runs as micro-batches of MICRO_BATCH with
+    # gradient accumulation (same effective batch, same recipe), plus gradient checkpointing.
+    cuda = device == "cuda"
+    bf16 = cuda and torch.cuda.is_bf16_supported()
+    amp_dtype = torch.bfloat16 if bf16 else torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=cuda and not bf16)
+    if cuda:
+        model.gradient_checkpointing_enable()
 
     step, t0 = 0, time.time()
     for epoch in range(EPOCHS):
@@ -133,17 +143,21 @@ def train(train_rows: list[Row], device: str, log: Callable[[str], None] = print
         random.shuffle(rows)
         for start in range(0, len(rows), BATCH):
             chunk = rows[start : start + BATCH]
-            enc = tok(
-                [r["text"] for r in chunk], truncation=True, max_length=MAX_LEN, padding=True, return_tensors="pt"
-            )
-            labels = torch.tensor([int(r["label"]) for r in chunk])
-            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=autocast):
-                loss = model(**enc.to(device), labels=labels.to(device)).loss
-            loss.backward()
+            for m in range(0, len(chunk), MICRO_BATCH):
+                micro = chunk[m : m + MICRO_BATCH]
+                enc = tok(
+                    [r["text"] for r in micro], truncation=True, max_length=MAX_LEN, padding=True, return_tensors="pt"
+                )
+                labels = torch.tensor([int(r["label"]) for r in micro])
+                with torch.autocast("cuda", dtype=amp_dtype, enabled=cuda):
+                    loss = model(**enc.to(device), labels=labels.to(device)).loss
+                scaler.scale(loss * len(micro) / len(chunk)).backward()
+            scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
+            scaler.step(opt)
+            scaler.update()
             sched.step()
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=True)
             step += 1
             if step % 50 == 0 or step == total:
                 log(f"epoch {epoch + 1} step {step}/{total} loss {loss.item():.4f} ({time.time() - t0:.0f}s)")
