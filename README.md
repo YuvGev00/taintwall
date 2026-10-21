@@ -13,29 +13,42 @@ taintwall sits between the agent and its tools and defends in two layers:
 | **L1: detector** | A fine-tuned classifier scores every tool result and redacts likely injections | Probabilistic, tuned to ≤1% false positives |
 | **L2: taint policy** | Tracks where every value came from. Blocks side-effecting tool calls (send money, send email, share file) whose sensitive arguments appear *only* in untrusted tool output | Deterministic for the flows it encodes, at a measured utility cost |
 
-> **Status: in progress.** The harness, frozen splits, CI and the R1 replay are done. The defenses come next. The full plan is in [SPEC.md](SPEC.md).
+## Headline (held-out test split, 461 attacked pairs)
+
+| Setting | Attack success: no defense → defense | Benign utility: no defense → defense |
+|---|---|---|
+| **Worst case** (R1: an agent that obeys every injection) | 97.0% → **3.9%** with ProtectAI + L2 | 100% → 83.8% |
+| **Live, a model that falls for attacks** (R2: Gemini 3.1 Flash-Lite) | 55.5% → **13.7%** with L2 | 91.2% → 72.1% |
+| Same model, ProtectAI detector instead | 55.5% → 13.7% | 91.2% → **44.1%** |
+| **Live, frontier model** (R3: Claude Haiku 5.5) | 0/335 side-effecting attacks succeed even with no defense | 82.4% → 73.5% (−8.8 pts, p = 0.21) |
+
+- On a live model, **L2 blocks as many attacks as the ProtectAI detector, while keeping 19 of the 30 benign tasks ProtectAI breaks** (49/68 vs 30/68 solved). Utility *under attack* goes up with L2 (38% → 48%), because hijacked runs are stopped instead of derailed. ProtectAI's goes down (38% → 16%).
+- A frontier model already resists this attack. On Haiku 5.5, the only successes (14/461) are a text-only injection ("say that I should visit Riverside View Hotel"), which no tool-call firewall can block. There, L2 is pure cost: about 9 points of benign utility, not statistically significant at n = 68.
+- Every defense was tuned on the dev split only and frozen before the first test run (L2 policy at `d8e79b6`). Every number has a 95% bootstrap CI and a paired McNemar test against no defense; see below.
 
 ## Results
+
+All tables come from `uv run python -m taintwall.eval.make_report`, over the raw per-pair JSONs in [`results/`](results/).
 
 ### R1: hijacked-agent replay (model-free worst case, test split)
 
 Every (user task, injection task) pair is replayed as an agent that obeys every injection it reads. Scoring uses AgentDojo's own checkers. It is deterministic, needs no API key, and the full test split runs in about 4 seconds.
 
-| Defense | Benign utility ↑ | Attack success ↓ (same 335 injectable pairs) |
-|---|---|---|
-| none | 68/68 (100%) | 325/335 (97.0%) |
-| **taintwall L2 (taint policy)** | **53/68 (77.9%)** | **44/335 (13.1%)** |
-| ProtectAI detector | 68/68 (100%) | 88/335 (26.3%) |
-| ProtectAI + L2 | 57/68 (83.8%) | 13/335 (3.9%) |
-| taintwall L1 + L2 | — | — |
+| Defense | Benign utility ↑ | Attack success ↓ (335 injectable pairs) | ASR vs none (paired) |
+|---|---|---|---|
+| none | 68/68 (100%) | 325/335 (97.0%, CI 94.9–98.5) | — |
+| **taintwall L2 (taint policy)** | **53/68 (77.9%)** | **44/335 (13.1%, CI 9.6–16.7)** | −83.9 pts, p < 0.001 |
+| ProtectAI detector | 68/68 (100%) | 88/335 (26.3%, CI 21.8–31.0) | −70.7 pts, p < 0.001 |
+| **ProtectAI + L2** | **57/68 (83.8%)** | **13/335 (3.9%, CI 1.8–6.0)** | −93.1 pts, p < 0.001 |
+| taintwall L1 (own detector) | 68/68 (100%) | 154/335 (46.0%, CI 40.6–51.1) | −51.0 pts, p < 0.001 |
+| taintwall L1 + L2 | 53/68 (77.9%) | 26/335 (7.8%, CI 5.1–10.7) | −89.3 pts, p < 0.001 |
 
 - The no-defense row is the ceiling. It matches the ~97.5% that [upstream #208](https://github.com/ethz-spylab/agentdojo/issues/208) found independently.
 - ProtectAI (`protectai/deberta-v3-base-prompt-injection-v2`, threshold 0.5, tool outputs truncated to 512 tokens) redacts any output it flags. In ProtectAI + L2, ProtectAI screens outputs and L2 gates calls.
   - ProtectAI alone leaves 69/168 workspace attacks through. It stops all travel attacks and most banking attacks.
-  - Combined, attacks fall from 44 to 13 (all workspace). Benign utility is *higher* than L2 alone (57 vs 53), because a redacted output can no longer taint a later argument. That is a real effect of the combination, not a free lunch: it holds only while the detector does not flag benign outputs (it flagged none in R1 benign runs).
-  - Dev: ProtectAI 12/39 attacks, 29/29 benign; ProtectAI + L2 0/39, 26/29.
-- The L2 policy was tuned on dev only and frozen at commit `d8e79b6` before the first test run.
-- 9 injection tasks with empty ground truths are excluded (see below).
+  - Combined, attacks fall from 44 to 13 (all workspace). Benign utility is *higher* than L2 alone (57 vs 53), because a redacted output can no longer taint a later argument. That holds only while the detector does not flag benign outputs, which it does not in the replay (the replay agent follows the ground truth regardless). Live, it does: see R2.
+- **L1, my own detector (ModernBERT-base fine-tuned on synthetic data), loses to ProtectAI here** (46.0% vs 26.3% alone). It beats ProtectAI on its in-distribution synthetic test set (TPR 95.6% vs 84.7% at matched FPR, AUROC 0.996 vs 0.962) but generalizes worse to real injections (InjecAgent AUROC 0.671 vs 0.781). An honest negative result, written up in [DECISIONS.md](DECISIONS.md). The recommended configuration is ProtectAI + L2.
+- 9 injection tasks with empty ground truths (text-only goals) are excluded, because there is no tool call to replay.
 
 **By suite (test), attack success none → L2:**
 
@@ -57,28 +70,27 @@ Every (user task, injection task) pair is replayed as an agent that obeys every 
 - **The 44 attacks that got through fall outside what L2 protects:**
   - deleting a file by ID (28). IDs are not sensitive arguments, because benign tasks take them from search results;
   - creating a participant-less calendar event (12);
-  - a malicious link sent to a legitimate recipient (3). The payload is in the message body, which is the detector's (L1) job;
+  - a malicious link sent to a legitimate recipient (3). The payload is in the message body, which is the detector's job;
   - booking a hotel the attacker *computes* from a trusted catalog (1). Only intent-level checks such as CaMeL can catch this.
 
-### R2 / R3: live agents (dev, preliminary)
+### R2 / R3: live agents (test split)
 
-**Dev split only, 87 attacked pairs and 29 benign tasks per config, so these are preliminary.** Nothing here is on the held-out test split. Rows: no defense, `spotlighting_with_delimiting` (AgentDojo baselines), and taintwall L2 (policy frozen at `d8e79b6`, run live for the first time). Counts are k/n; confidence intervals come with the test runs. Raw JSONs are in [`results/`](results/), and model ids, dates and token counts are in [`results/COSTS.md`](results/COSTS.md).
+Live agents on the same 461 test pairs and 68 benign tasks, `important_instructions` attack, temperature 0 where the API allows it. Model ids, dates and token counts are in [`results/COSTS.md`](results/COSTS.md).
 
-| Regime | Model | Defense | Benign utility | Utility under attack | Attack success |
-|---|---|---|---|---|---|
-| R2 | `gemini-3.1-flash-lite` | none | 26/29 | 52/87 | **36/87 (41%)** |
-| R2 | `gemini-3.1-flash-lite` | spotlighting | 26/29 | 61/87 | 31/87 (36%) |
-| R3 | `gemini-3.5-flash` | none | 29/29 | 81/87 | 0/87 |
-| R3 | `gemini-3.5-flash` | spotlighting | 28/29 | 82/87 | 0/87 |
-| R2 | `gemini-3.1-flash-lite` | **taintwall L2** | 24/29 | 58/87 | **6/87 (6.9%)** |
-| R3 | `gemini-3.5-flash` | **taintwall L2** | 25/29 | 78/87 | 0/87 |
+| Regime | Model | Defense | Benign utility | Utility under attack | Attack success (all 461) | Attack success (335 side-effecting) | ASR vs none (paired) | BU vs none (paired) |
+|---|---|---|---|---|---|---|---|---|
+| R2 | `gemini-3.1-flash-lite` | none | 62/68 (91.2%) | 177/461 (38.4%) | 256/461 (55.5%, CI 51.0–60.1) | 236/335 (70.4%) | — | — |
+| R2 | `gemini-3.1-flash-lite` | spotlighting | 60/68 (88.2%) | 194/461 (42.1%) | 222/461 (48.2%, CI 43.6–52.7) | 203/335 (60.6%) | −7.4 pts, p < 0.001 | −2.9 pts, p = 0.69 |
+| R2 | `gemini-3.1-flash-lite` | ProtectAI | 30/68 (44.1%) | 75/461 (16.3%) | 63/461 (13.7%, CI 10.6–16.9) | 63/335 (18.8%) | −41.9 pts, p < 0.001 | −47.1 pts, p < 0.001 |
+| R2 | `gemini-3.1-flash-lite` | **taintwall L2** | **49/68 (72.1%)** | **220/461 (47.7%)** | **63/461 (13.7%, CI 10.6–16.9)** | 51/335 (15.2%) | −41.9 pts, p < 0.001 | −19.1 pts, p < 0.001 |
+| R3 | `claude-haiku-5-5` (effort medium) | none | 56/68 (82.4%) | 362/461 (78.5%) | 14/461 (3.0%, CI 1.5–4.6) | 0/335 | — | — |
+| R3 | `claude-haiku-5-5` (effort medium) | taintwall L2 | 50/68 (73.5%) | 317/461 (68.8%) | 14/461 (3.0%, CI 1.5–4.6) | 0/335 | +0.0 pts, p = 1.0 | −8.8 pts, p = 0.21 |
 
-- **R2 selection rule** (no-defense dev ASR of at least 20%): `gemini-3.1-flash-lite` passes (41%).
-  - `nvidia/nemotron-3.5-super-vl:free` fails the rule: 4/87 (4.6%), all in banking. Its numbers are in `results/` and `COSTS.md` but it is not in the R2 table, and no spotlighting run was made for it.
-  - The second suggested OpenRouter model (`xingchen-agi/xing4.0-29b-a4b:free`) was not run, because a free model takes about an hour per config under OpenRouter's rate limits. R2 therefore has one model so far.
-- **L2 live (dev, preliminary):** attack success 36/87 → 6/87 on R2, at a benign-utility cost of 2 tasks (26 → 24 of 29). All 6 remaining successes are travel `injection_task_4` (book the priciest hotel), the known "attacker computes a catalog item" limitation. On R3, benign utility drops 29 → 25 of 29, with no security to gain (0/87 either way). Blocked calls are returned to the model as errors, so it can recover; the utility cost is the policy's false positives (delegation tasks, see above).
-- **R3 expected result:** `gemini-3.5-flash` ignores the injections (0/87 with and without spotlighting), so it only measures utility cost, not security. Spotlighting changes it by one benign task, which is within noise at n=29.
-- **Cost:** these runs used the Gemini API on a paid billing account (the free tier allows about 20 requests per day per model) and OpenRouter with a $10 credit balance, which unlocks 1000 free-model requests per day. `:free` models are not charged. See `results/COSTS.md`.
+- **R2 selection rule** (no-defense dev ASR ≥ 20%): `gemini-3.1-flash-lite` passes (41% on dev, 55.5% on test). `nvidia/nemotron-3.5-super-vl:free` failed it on dev (4.6%) and was not run on test.
+- **R3 model change:** dev used `gemini-3.5-flash` (0/87 attacks). Test uses Claude Haiku 5.5 instead, because the projected Gemini 3.5 Flash test cost (about $23 for two configs) was several times higher. The change was made before any R3 test run, and is logged in DECISIONS.md.
+- **The 63 attacks that still succeed with L2 (R2)** are the same categories as R1: delete a file by ID (26), a participant-less calendar event (14), the text-only travel injection (12), a malicious link to a legitimate recipient (7), plus **4 that L2 actually blocked**. In those 4 (slack, invite an attacker's email), every attacker call returned "Blocked by policy", but AgentDojo counts an *attempted* call as success ([upstream #168](https://github.com/ethz-spylab/agentdojo/issues/168)). I report the checker's number unchanged.
+- **Why live ProtectAI costs so much utility:** AgentDojo's `TransformersBasedPIDetector` replaces any flagged tool output with a warning. Live agents read long benign outputs (inboxes, file lists, reviews), the detector flags some of them, and the task can no longer be solved. The replay hides this, because its agent ignores tool outputs.
+- **ProtectAI run note:** it was finished on a Colab T4. A few workspace outputs are so long (≈30K characters) that the classifier needs more memory than the T4 has; about 150 such classification calls ran in fp16 instead of fp32 (same model, same input). All other runs used fp32.
 
 ## Service
 
@@ -186,13 +198,13 @@ DECISIONS.md              dated decision log
 - [x] Week 1: harness, frozen split, CI
 - [x] R1 hijacked-agent replay harness, with the no-defense ceiling measured
 - [x] L2 taint policy v1: attack success 97.0% → 13.1% (worst case, test) at a benign-utility cost of 22 points
-- [x] R2/R3 dev baselines (no defense, spotlighting): 1 R2 model passed the headroom rule, 1 R3 model. taintwall L2 live on dev. Still to do: ProtectAI live, a second R2 model, and the test split
 - [x] ProtectAI and ProtectAI + L2 in R1 (dev and test)
 - [x] Indirect-injection dataset (23.4k rows, 50/50, span-level splits) and contamination audit (0/23,427 flagged), gated in CI
-- [ ] Fine-tuned detector (ModernBERT): `training/train.ipynb` ready for a free Colab T4; threshold at FPR ≤ 1% on dev vs the protectai baseline
-- [x] Service (FastAPI + SQLite/Postgres + Prometheus + OpenTelemetry + Docker) and load test; [ ] end-to-end L1 results
-- [ ] Ablations, frozen config, full test-split runs with paired statistics
-- [ ] Traces, load test, demo, write-up
+- [x] Fine-tuned detector (ModernBERT-base, Colab T4), threshold at FPR ≤ 1% on dev; R1 test results (negative generalization finding)
+- [x] Service (FastAPI + SQLite/Postgres + Prometheus + OpenTelemetry + Docker) and load test
+- [x] Full test-split live runs (R2: none, spotlighting, ProtectAI, L2; R3: none, L2) with bootstrap CIs and paired McNemar tests
+- [ ] Turn L2 blocks on delegation tasks into user confirmations, and add file IDs / event titles as policy-checked arguments (the two largest remaining attack categories)
+- [ ] A second R2 model; L1 live; write-up
 
 ## License
 
