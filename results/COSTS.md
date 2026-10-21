@@ -45,3 +45,21 @@ List prices (third-party aggregators, not read from Google's console): flash-lit
 | **Total** | **85 M** | **about 41** |
 
 This exceeds the ~$15 budget, so the full test runs wait for approval.
+
+## Test-split runs (2026-10-21)
+
+Token totals from `runs/usage/` for the Gemini runs (they include the dev runs made from this checkout and any resumed or
+duplicated episodes). Prices are the list prices above ($0.25 in / $1.50 out per M tokens for flash-lite).
+
+| Regime | Model | Defense | Prompt tokens | Completion tokens | ≈ $ |
+|---|---|---|---|---|---|
+| R2 | `gemini-3.1-flash-lite` | none | 22,423,669 | 239,544 | 6.0 |
+| R2 | `gemini-3.1-flash-lite` | spotlighting | 22,404,800 | 214,856 | 5.9 |
+| R2 | `gemini-3.1-flash-lite` | taintwall-l2 | 32,313,316 | 291,698 | 8.5 |
+| R2 | `gemini-3.1-flash-lite` | protectai | 65,027,625 | 350,518 | 16.8 |
+| R3 | `claude-haiku-5-5` (effort medium) | none, taintwall-l2 | not logged | not logged | see Anthropic console |
+
+- The ProtectAI total is inflated: the run was restarted several times (laptop memory, Modal, GPU memory) and some episodes ran
+  in two shards at once before the sharding was fixed.
+- The Claude adapter does not log usage yet; the exact charge is in the Anthropic console.
+- Compute: ProtectAI ran on a Colab T4 (existing subscription); Modal was not charged.

@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from taintwall.eval.replay import empty_ground_truth_injections
+from taintwall.eval.splits import load_splits
 from taintwall.eval.stats import bootstrap_ci, mcnemar_exact, paired_bootstrap_diff
 
 RESULTS = Path(__file__).resolve().parents[3] / "results"
@@ -22,6 +24,8 @@ R1_DEFENSES = (
     ("taintwall-l2", "taintwall L2"),
     ("protectai", "ProtectAI"),
     ("protectai+l2", "ProtectAI + L2"),
+    ("taintwall-l1", "taintwall L1"),
+    ("taintwall-l1+l2", "taintwall L1 + L2"),
 )
 LIVE_ROWS = (
     (
@@ -34,7 +38,8 @@ LIVE_ROWS = (
             ("taintwall-l2", "taintwall L2"),
         ),
     ),
-    ("R3", "gemini-3.5-flash", (("none", "none"), ("taintwall-l2", "taintwall L2"))),
+    # R3 moved from gemini-3.5-flash (dev) to Claude Haiku 5.5 before the test run, for cost (DECISIONS.md).
+    ("R3", "claude-haiku-5-5-medium", (("none", "none"), ("taintwall-l2", "taintwall L2"))),
 )
 
 Outcomes = dict[tuple[str, ...], bool]
@@ -83,9 +88,16 @@ def _cell(o: Outcomes) -> str:
     return f"{sum(vals)}/{len(vals)} ({p:.1%}, CI {lo:.1%} to {hi:.1%})"
 
 
+def _side_effecting(o: Outcomes) -> Outcomes:
+    """Drop text-only injection tasks (empty ground truth): no tool call for a call-level firewall to stop."""
+    version = load_splits()["benchmark_version"]
+    text_only = {(s, i) for s in SUITES for i in empty_ground_truth_injections(s, version)}
+    return {k: v for k, v in o.items() if (k[0], k[2]) not in text_only}
+
+
 def _vs_none(o: Outcomes, base: Outcomes, label: str) -> str:
     """Paired difference vs no defense on the shared keys, as 'diff [CI], p'."""
-    if o is base:
+    if label == "none":
         return "—"
     keys = sorted(set(o) & set(base))
     a = [o[k] for k in keys]
@@ -116,8 +128,8 @@ def r1_table() -> str:
 def live_table() -> str:
     lines = [
         "| Regime | Model | Defense | Benign utility | Utility under attack | Attack success "
-        "| ASR vs none (paired) | BU vs none (paired) |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Attack success, side-effecting attacks | ASR vs none (paired) | BU vs none (paired) |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for regime, model, defenses in LIVE_ROWS:
         base = _live(model, "none")
@@ -127,6 +139,7 @@ def live_table() -> str:
                 continue
             lines.append(
                 f"| {regime} | `{model}` | {name} | {_cell(cur[0])} | {_cell(cur[1])} | {_cell(cur[2])} | "
+                f"{_cell(_side_effecting(cur[2]))} | "
                 f"{_vs_none(cur[2], base[2], d)} | {_vs_none(cur[0], base[0], d)} |"
             )
     if len(lines) == 2:
@@ -141,7 +154,9 @@ def main() -> None:
     print(live_table())
     print(
         "95% percentile-bootstrap CIs (10,000 resamples of episodes). Paired columns: difference to no defense "
-        "(defense minus none) on the same pairs or tasks, paired-bootstrap CI, exact McNemar p-value.\n"
+        "(defense minus none) on the same pairs or tasks, paired-bootstrap CI, exact McNemar p-value. "
+        "Side-effecting attacks exclude the 9 injection tasks with an empty ground truth (text-only goals such as "
+        "'say that I should visit X'), which a tool-call firewall cannot block by design; R1 excludes them too.\n"
     )
 
 

@@ -250,3 +250,26 @@ R1 worst case, test split (335 injectable pairs):
   model can be swapped without touching the API. Sync handlers, so model/DB calls run in the threadpool.
 - **Not done:** auth, rate limiting, and a Postgres load run (SQLite serializes writes).
 
+
+## 2026-10-21: Test-split live runs, and what changed on the way
+
+- **R3 model: Claude Haiku 5.5 instead of Gemini 3.5 Flash.** Dev R3 used `gemini-3.5-flash`. The projected test cost for its
+  two configs was about $23 (see COSTS.md), several times the Haiku cost, and R3 only measures utility cost (the model resists the
+  attack either way). Switched before any R3 test episode ran. Haiku runs with adaptive thinking at effort `medium`; Claude 5.5
+  models accept no sampling parameters, so these runs are not at temperature 0.
+- **Side-effecting ASR column.** Live attack success is reported both over all 461 pairs and over the 335 pairs whose injection
+  task has a tool-call ground truth. The other 9 injection tasks are text-only goals ("say that I should visit X"); a call-level
+  firewall cannot block them by design, and R1 already excludes them. On Haiku 5.5 every success (14/461) is one such task.
+- **Scorer artifact, reported unchanged.** In 4 R2 L2 "successes" (slack, invite an attacker's email) every attacker call was
+  blocked; AgentDojo's checker inspects attempted calls, not the resulting environment (upstream #168). The tables keep the
+  checker's numbers; the README names the 4 cases.
+- **ProtectAI live on a cloud GPU, partly in fp16.** The local run filled a 16 GB laptop's memory: AgentDojo's
+  `TransformersBasedPIDetector` classifies whole tool outputs without truncation, and a few workspace outputs are about 30K
+  characters (over 10 GB for DeBERTa attention). Modal was tried first (account disabled before the job ran); the run finished
+  on a Colab T4 with shards sharing the GPU. An output that runs out of memory is retried with the GPU held exclusively, then in
+  fp16 (about 150 classification calls). Same model, same input; scores may differ in the last digits. The episodes already done
+  locally were resumed, not rerun. The result JSONs were rebuilt from a compact per-pair export and checked against the per-suite
+  totals Colab printed (all four matched).
+- **Live ProtectAI vs L2.** Same attack success (63/461 each), very different cost: ProtectAI keeps 30/68 benign tasks, L2 49/68.
+  The replay (R1) showed ProtectAI at 68/68 benign utility only because the replay agent ignores tool outputs; live, a redacted
+  benign output breaks the task. This is why R1 alone is not enough.
