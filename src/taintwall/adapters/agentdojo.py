@@ -1,8 +1,7 @@
 """Build AgentDojo pipelines for any model, independent of AgentDojo's dated ModelsEnum.
 
-Defenses so far are AgentDojo's own baselines (none, spotlighting, protectai).
-The taintwall detector (L1) and policy guard (L2) plug in here later; see SPEC.md
-sections 5 and 7.
+Defenses: AgentDojo's own baselines (none, spotlighting, protectai) and taintwall's
+detector (L1), policy guard (L2) and both together; see SPEC.md sections 5 and 7.
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ from agentdojo.agent_pipeline import (
     BasePipelineElement,
     InitQuery,
     OpenAILLM,
+    PromptInjectionDetector,
     SystemMessage,
     ToolsExecutionLoop,
     ToolsExecutor,
@@ -46,15 +46,17 @@ from agentdojo.types import (
     ChatAssistantMessage,
     ChatMessage,
     ChatToolResultMessage,
+    get_text_content_as_str,
     text_content_block_from_string,
 )
 
+from taintwall.detector import L1Detector
 from taintwall.policy import TaintPolicy, load_registry
 
 Provider = Literal["ollama", "openai-compatible", "anthropic"]
-Defense = Literal["none", "spotlighting", "protectai", "taintwall-l2"]
+Defense = Literal["none", "spotlighting", "protectai", "taintwall-l2", "taintwall-l1", "taintwall-l1+l2"]
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
-DEFENSES: tuple[Defense, ...] = ("none", "spotlighting", "protectai", "taintwall-l2")
+DEFENSES: tuple[Defense, ...] = ("none", "spotlighting", "protectai", "taintwall-l2", "taintwall-l1", "taintwall-l1+l2")
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 _EMPTY_ENV = EmptyEnv()
@@ -261,6 +263,39 @@ class PolicyToolsExecutor(ToolsExecutor):
         return query, runtime, env, history, extra_args
 
 
+class L1PIDetector(PromptInjectionDetector):
+    """The L1 detector as an AgentDojo pipeline element (mode "message").
+
+    Redacts a flagged tool output with AgentDojo's own replacement text. The trailing
+    run of tool results (a parallel batch) is scored in one batch before upstream's
+    per-message loop, which then hits the score cache.
+    """
+
+    def __init__(self, detector: L1Detector | None = None) -> None:
+        super().__init__(mode="message", raise_on_injection=False)
+        self.detector = detector if detector is not None else L1Detector()
+
+    def detect(self, tool_output: str) -> tuple[bool, float]:
+        score = self.detector.score(tool_output)
+        return score >= self.detector.threshold, score
+
+    def query(
+        self,
+        query: str,
+        runtime: FunctionsRuntime,
+        env: Env = _EMPTY_ENV,  # type: ignore[assignment]  # same default as upstream
+        messages: Sequence[ChatMessage] = (),
+        extra_args: dict[str, Any] = {},  # noqa: B006 - matches the AgentDojo signature
+    ) -> tuple[str, FunctionsRuntime, Env, Sequence[ChatMessage], dict[str, Any]]:
+        texts = []
+        for message in reversed(messages):
+            if message["role"] != "tool":
+                break
+            texts.append(get_text_content_as_str(message["content"]) or "")
+        self.detector.warm(texts)
+        return super().query(query, runtime, env, messages, extra_args)
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     provider: Provider
@@ -334,6 +369,12 @@ def build_pipeline(
         if suite_name is None:
             raise ValueError("taintwall-l2 needs suite_name to load its tool registry")
         loop_elements = [PolicyToolsExecutor(TaintPolicy(load_registry(suite_name))), llm]
+    elif defense == "taintwall-l1":
+        loop_elements = [ToolsExecutor(), L1PIDetector(), llm]
+    elif defense == "taintwall-l1+l2":
+        if suite_name is None:
+            raise ValueError("taintwall-l1+l2 needs suite_name to load its tool registry")
+        loop_elements = [PolicyToolsExecutor(TaintPolicy(load_registry(suite_name))), L1PIDetector(), llm]
     else:
         loop_elements = [ToolsExecutor(), llm]
 
