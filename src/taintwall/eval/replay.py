@@ -47,6 +47,7 @@ from agentdojo.types import (
 )
 from pydantic import BaseModel
 
+from taintwall.detector import L1Detector
 from taintwall.eval.splits import load_splits
 from taintwall.policy import TaintPolicy, load_registry
 
@@ -295,6 +296,39 @@ class ProtectAIPlusL2(ProtectAIDetector):
         return self.l2.allow_call(call, ctx)
 
 
+class TaintwallL1:
+    """The fine-tuned L1 detector as a replay defense: redact an output scoring at or above
+    the dev-chosen threshold (FPR <= 1% on the L1 dev split). Scores are batched and cached
+    by text hash (`taintwall.detector`)."""
+
+    name = "taintwall-l1"
+
+    def __init__(self, detector: L1Detector | None = None) -> None:
+        self.detector = detector if detector is not None else L1Detector()
+
+    def warm(self, texts: Sequence[str]) -> None:
+        self.detector.warm(texts)
+
+    def screen_output(self, function: str, text: str) -> str | None:
+        return None if self.detector.flagged(text) else text
+
+    def allow_call(self, call: FunctionCall, ctx: ReplayContext) -> str | None:
+        return None
+
+
+class TaintwallL1PlusL2(TaintwallL1):
+    """L1 screens outputs, L2 gates calls: the full taintwall."""
+
+    name = "taintwall-l1+l2"
+
+    def __init__(self, suite_name: str, detector: L1Detector | None = None) -> None:
+        super().__init__(detector)
+        self.l2 = TaintwallL2(suite_name)
+
+    def allow_call(self, call: FunctionCall, ctx: ReplayContext) -> str | None:
+        return self.l2.allow_call(call, ctx)
+
+
 class _Recorder(NoDefense):
     """Passes everything through and records each tool output, to batch-classify them up front."""
 
@@ -306,7 +340,7 @@ class _Recorder(NoDefense):
         return text
 
 
-R1_DEFENSES = ("none", "taintwall-l2", "protectai", "protectai+l2")
+R1_DEFENSES = ("none", "taintwall-l2", "protectai", "protectai+l2", "taintwall-l1", "taintwall-l1+l2")
 
 
 def get_defense(name: str, suite_name: str) -> ReplayDefense:
@@ -318,13 +352,17 @@ def get_defense(name: str, suite_name: str) -> ReplayDefense:
         return ProtectAIDetector()
     if name == "protectai+l2":
         return ProtectAIPlusL2(suite_name)
+    if name == "taintwall-l1":
+        return TaintwallL1()
+    if name == "taintwall-l1+l2":
+        return TaintwallL1PlusL2(suite_name)
     raise ValueError(f"no R1 implementation for defense {name!r} yet")
 
 
 def run_suite(
     suite_name: str, split: str, defense: ReplayDefense, attack_name: str = "important_instructions"
 ) -> dict[str, Any]:
-    if isinstance(defense, ProtectAIDetector):
+    if isinstance(defense, ProtectAIDetector | TaintwallL1):
         # A pass-through replay sees a superset of the outputs any redacting defense will, so
         # classifying them all first (in batches) leaves the real run with cache hits only.
         recorder = _Recorder()
