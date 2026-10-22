@@ -1,4 +1,4 @@
-.PHONY: serve loadtest dev lint test splits r1 eval-dev summarize-dev dataset audit
+.PHONY: demo serve loadtest dev lint test splits r1 eval-dev summarize-dev dataset audit
 
 MODEL ?= qwen3:8b
 
@@ -40,6 +40,9 @@ eval-dev:
 
 summarize-dev:
 	uv run python -m taintwall.eval.run_agentdojo summarize --split dev --model $(MODEL)
+
+demo:
+	uv run python -m taintwall.demo
 
 serve:
 	uv run uvicorn taintwall.api.app:app --port 8000
