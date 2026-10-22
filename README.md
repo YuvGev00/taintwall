@@ -13,6 +13,19 @@ taintwall sits between the agent and its tools and defends in two layers:
 | **L1: detector** | A fine-tuned classifier scores every tool result and redacts likely injections | Probabilistic, tuned to ≤1% false positives |
 | **L2: taint policy** | Tracks where every value came from. Blocks side-effecting tool calls (send money, send email, share file) whose sensitive arguments appear *only* in untrusted tool output | Deterministic for the flows it encodes, at a measured utility cost |
 
+```mermaid
+flowchart LR
+    U["User request<br/>(trusted)"] --> A["LLM agent"]
+    A -- "tool call" --> L2{"L2: taint policy"}
+    L2 -- "allow" --> T["Tools<br/>bank, email, files, web"]
+    L2 -- "block + reason" --> A
+    T -- "tool output" --> L1{"L1: detector"}
+    L1 -- "clean or redacted" --> A
+    U -. "trusted values" .-> P[("Session provenance")]
+    T -. "trusted fields / untrusted text" .-> P
+    P --> L2
+```
+
 ## Headline (held-out test split, 461 attacked pairs)
 
 | Setting | Attack success: no defense → defense | Benign utility: no defense → defense |
